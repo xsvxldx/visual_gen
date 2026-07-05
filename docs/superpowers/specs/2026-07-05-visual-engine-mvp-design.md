@@ -144,6 +144,7 @@ All live errors are non-fatal. The process only exits on startup validation fail
 - **Audio:** swap `VsyncClock` for an `AudioClock` behind the `Clock` interface.
 - **New input adapters** (keyboard, OSC, Stream Deck): new emitters onto the same command queue.
 - **Live effect control (roadmap #6):** multi-channel MIDI controllers (notes, CCs, any channel) map to future commands with payloads (e.g. `SET_PARAM(effect, value)`) flowing down the same queue to a renderer-side effect chain. `Command` grows from a plain enum to payload-carrying messages — additive, no rewrite.
+- **Audio-reactive effects:** an `AudioAnalyzer` input adapter (own thread: capture → level/beat/band features → parameter updates) feeding the same effect chain MIDI CCs would. Discrete events (cue switching) and continuous modulation stay on separate paths, so audio can drive effects but never trigger cue changes. Continuous streams may get their own "modulation bus" beside the command queue — a future decision the current boundaries leave open.
 - **New cue types** (image sequence, webcam, shader, Syphon, NDI): `Cue.source` is type-agnostic; new player implementations slot in behind the `PlaybackEngine`.
 
 ## Out of scope for MVP
