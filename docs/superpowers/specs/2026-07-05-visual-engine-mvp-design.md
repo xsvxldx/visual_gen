@@ -143,6 +143,7 @@ All live errors are non-fatal. The process only exits on startup validation fail
 - **Transitions (roadmap #1):** the SWITCHING state is the future transition window (today it is one frame long). Both players are already alive during a switch; a crossfade is a second sampler + one `mix()` uniform in the fragment shader. Touches two files, rewrites nothing.
 - **Audio:** swap `VsyncClock` for an `AudioClock` behind the `Clock` interface.
 - **New input adapters** (keyboard, OSC, Stream Deck): new emitters onto the same command queue.
+- **Live effect control (roadmap #6):** multi-channel MIDI controllers (notes, CCs, any channel) map to future commands with payloads (e.g. `SET_PARAM(effect, value)`) flowing down the same queue to a renderer-side effect chain. `Command` grows from a plain enum to payload-carrying messages — additive, no rewrite.
 - **New cue types** (image sequence, webcam, shader, Syphon, NDI): `Cue.source` is type-agnostic; new player implementations slot in behind the `PlaybackEngine`.
 
 ## Out of scope for MVP
