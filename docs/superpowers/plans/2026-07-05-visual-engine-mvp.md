@@ -10,6 +10,29 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-05-visual-engine-mvp-design.md`
 
+## Progress (last updated 2026-07-07)
+
+Executing task-by-task with TDD. Each task: failing test → implement → green → commit.
+
+- [x] **Task 1** — scaffold `visualgen` + `Command` enum (`commands.py`) — commit `01e298d`
+- [x] **Task 2** — show loading + validation (`show.py`) — commit `3869248`
+- [x] **Task 3** — config loading (`config.py`) — commit `54a484f`
+- [x] **Task 4** — CueManager FSM (`cues.py`) — commit `15b00f4`
+- [x] **Task 5** — Clock abstraction (`clock.py`) — commit `f6cebf7`
+- [x] **Task 6** — fullscreen window + solid-color renderer (**Milestone 1**) — commit `374fec6`, manually verified (dark-blue fullscreen, ESC exits)
+- [ ] **Task 7** — VideoPlayer: decode thread, ring buffer, seamless loop (`player.py`) ← **NEXT**
+- [ ] Task 8 — GPU YUV rendering + single-video playback (Milestone 2)
+- [ ] Task 9 — PlaybackEngine with preloading + fallback (`engine.py`)
+- [ ] Task 10 — wire it together + keyboard switching (Milestones 3–5)
+- [ ] Task 11 — MIDI input (Milestone 6)
+- [ ] Task 12 — live failure path verification (Milestone 7)
+- [ ] Task 13 — stability soak + operator docs (Milestone 8)
+
+**State:** 27 tests green (`uv run pytest -q`), working tree clean. Tasks 1–5 are
+pure logic (fully unit-tested); Task 6 has no unit tests (needs a display) and was
+verified manually. Resume at **Task 7** below — it returns to automated tests (the
+fixture generates a real clip on the fly) and needs no display.
+
 ## Global Constraints
 
 - Python `>=3.12`, dependencies managed with `uv` (`uv sync`, `uv run ...`).
