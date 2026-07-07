@@ -73,6 +73,9 @@ class PlaybackEngine:
     def _collect_finished_preloads(self) -> None:
         for i in [i for i, f in self._pending.items() if f.done()]:
             future = self._pending.pop(i)
+            if i in self._players:
+                future.result().stop()
+                continue
             try:
                 self._players[i] = future.result()
             except PlayerError as exc:

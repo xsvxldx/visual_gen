@@ -52,8 +52,8 @@ class VideoPlayer:
             stream.thread_type = "AUTO"
             self._time_base = stream.time_base
             self._stream = stream
-            self._decoder = self._container.decode(stream)
-            first = next(self._decoder)
+            decoder = self._container.decode(stream)
+            first = next(decoder)
         except Exception as exc:
             raise PlayerError(f"{self._source}: {exc}") from exc
         self.first_frame = _convert(first, self._time_base)
@@ -68,12 +68,13 @@ class VideoPlayer:
 
     def _decode_loop(self) -> None:
         try:
+            decoder = self._container.decode(self._stream)
             while not self._stop_event.is_set():
                 try:
-                    frame = next(self._decoder)
+                    frame = next(decoder)
                 except (StopIteration, av.error.EOFError):
                     self._container.seek(0)
-                    self._decoder = self._container.decode(self._stream)
+                    decoder = self._container.decode(self._stream)
                     continue
                 converted = _convert(frame, self._time_base)
                 while not self._stop_event.is_set():
