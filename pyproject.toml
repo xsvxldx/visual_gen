@@ -1,0 +1,27 @@
+[project]
+name = "visualgen"
+version = "0.1.0"
+description = "Lightweight MIDI-controlled live visual engine for macOS"
+requires-python = ">=3.12"
+dependencies = [
+    "av>=12",
+    "moderngl>=5.10",
+    "glfw>=2.7",
+    "mido>=1.3",
+    "python-rtmidi>=1.5",
+    "PyYAML>=6",
+    "numpy>=1.26",
+]
+
+[project.scripts]
+visualgen = "visualgen.app:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["visualgen"]
