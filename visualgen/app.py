@@ -13,6 +13,7 @@ from visualgen.commands import Command
 from visualgen.config import ConfigError, load_config
 from visualgen.cues import CueManager, State
 from visualgen.engine import PlaybackEngine
+from visualgen.inputs.midi import MidiAdapter
 from visualgen.player import PlayerError
 from visualgen.render import Renderer
 from visualgen.show import ShowError, load_show
@@ -46,6 +47,8 @@ def run(show_path: Path, config_path: Path) -> int:
 
     caffeinate = _prevent_sleep()
     engine = PlaybackEngine(show, fallback=config.fallback)
+    midi = MidiAdapter(config, commands)
+    midi.start()
     try:
         win, size = window.create_fullscreen("visualgen")
         ctx = moderngl.create_context()
@@ -88,6 +91,7 @@ def run(show_path: Path, config_path: Path) -> int:
             glfw.swap_buffers(win)
         return 0
     finally:
+        midi.stop()
         engine.stop()
         caffeinate.terminate()
         window.terminate()
