@@ -60,11 +60,40 @@ class VideoPlayer:
         self._frames.put(self.first_frame)
 
     def start(self, now: float) -> None:
+        """Begin (or restart) continuous decoding from the top of the clip.
+
+        Restart-safe: any running decode thread is halted first, so a cue that is
+        revisited never ends up with two threads racing on the same container.
+        """
         if self.first_frame is None:
             raise PlayerError(f"{self._source}: start() before preload()")
+        self._halt()
+        self._drain()
+        if self._container is not None:
+            self._container.seek(0)  # replay from the start (safe: no decode thread running)
+        self._current = None
+        self._error = None
         self._epoch = now
+        self._stop_event.clear()
         self._thread = threading.Thread(target=self._decode_loop, daemon=True)
         self._thread.start()
+
+    def pause(self) -> None:
+        """Stop decoding but keep the container open so start() can resume instantly."""
+        self._halt()
+
+    def _halt(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            self._stop_event.set()
+            self._thread.join(timeout=2.0)
+        self._thread = None
+
+    def _drain(self) -> None:
+        while True:
+            try:
+                self._frames.get_nowait()
+            except queue.Empty:
+                return
 
     def _decode_loop(self) -> None:
         try:
@@ -105,10 +134,7 @@ class VideoPlayer:
         return result
 
     def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-            self._thread = None
+        self._halt()
         if self._container is not None:
             self._container.close()
             self._container = None

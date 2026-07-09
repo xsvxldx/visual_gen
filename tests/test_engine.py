@@ -20,6 +20,9 @@ class FakePlayer:
         self.started = False
         self.stopped = False
         self.fail_on_frame = False
+        self.running = False
+        self.double_started = False  # start() called while already running -> would spawn a 2nd decode thread
+        self.pause_count = 0
 
     def preload(self):
         if self.source.name == "explodes-on-preload.mp4":
@@ -27,7 +30,14 @@ class FakePlayer:
         self.preloaded = True
 
     def start(self, now):
+        if self.running:
+            self.double_started = True
+        self.running = True
         self.started = True
+
+    def pause(self):
+        self.running = False
+        self.pause_count += 1
 
     def frame_at(self, now):
         if self.fail_on_frame:
@@ -35,6 +45,7 @@ class FakePlayer:
         return fake_frame()
 
     def stop(self):
+        self.running = False
         self.stopped = True
 
 
@@ -169,6 +180,34 @@ def test_switch_to_failing_cue_engages_fallback_not_fatal():
     frame = engine.frame_at(0.2)
     assert frame is not None
     assert made[Path("/fake/safe.mp4")].started
+    engine.stop()
+
+
+def test_revisiting_resident_cue_never_double_starts():
+    # 3 cues with wrap: every cue is always current-or-adjacent, so none is ever
+    # dropped. Revisiting a resident, already-running player must NOT start a second
+    # decode thread on it (the wrap-around corruption bug).
+    engine, made = make_engine(show=Show(make_show(3).cues, wrap=True))
+    engine.start(0, {1, 2}, now=0.0)
+    assert wait_ready(engine)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert wait_ready(engine)
+    engine.switch_to(2, {0, 1}, now=2.0)
+    assert wait_ready(engine)
+    engine.switch_to(0, {1, 2}, now=3.0)  # wrap last -> first; cue 0 is still resident
+    p0 = made[Path("/fake/0.mp4")]
+    assert not p0.double_started, "re-started a running player -> second decode thread -> corruption"
+    engine.stop()
+
+
+def test_switching_away_pauses_the_outgoing_cue():
+    # Only the current cue should decode continuously; the one we leave must be paused.
+    engine, made = make_engine(show=Show(make_show(3).cues, wrap=True))
+    engine.start(0, {1, 2}, now=0.0)
+    assert wait_ready(engine)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert made[Path("/fake/0.mp4")].pause_count >= 1
+    assert not made[Path("/fake/0.mp4")].running
     engine.stop()
 
 

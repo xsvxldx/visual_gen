@@ -39,6 +39,7 @@ class MidiAdapter:
         self._commands = commands
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._retry_seconds = _RETRY_SECONDS
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -56,14 +57,23 @@ class MidiAdapter:
 
     def _run(self) -> None:
         port = None
+        last_problem = None  # dedup: only log a reconnect failure when the reason changes
         while not self._stop_event.is_set():
             if port is None:
                 try:
                     port = self._open_port()
                     log.info("MIDI connected: %s", port.name)
+                    last_problem = None
                 except Exception as exc:
-                    log.warning("MIDI unavailable (%s); retrying in %.0fs", exc, _RETRY_SECONDS)
-                    self._stop_event.wait(_RETRY_SECONDS)
+                    problem = str(exc)
+                    if problem != last_problem:
+                        log.warning(
+                            "MIDI unavailable (%s); retrying every %.0fs until connected",
+                            exc,
+                            self._retry_seconds,
+                        )
+                        last_problem = problem
+                    self._stop_event.wait(self._retry_seconds)
                     continue
             try:
                 for msg in port.iter_pending():

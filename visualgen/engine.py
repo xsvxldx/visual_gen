@@ -50,8 +50,11 @@ class PlaybackEngine:
 
     def switch_to(self, index: int, adjacent: set[int], now: float) -> None:
         self._collect_finished_preloads()
+        prev = self._current
         self._current = index
         self._on_fallback = False
+        if prev is not None and prev != index and prev in self._players:
+            self._players[prev].pause()  # only the incoming cue decodes continuously
         player = self._players.get(index)
         if player is None:
             try:

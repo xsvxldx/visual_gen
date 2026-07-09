@@ -79,6 +79,52 @@ def test_preload_bad_file_raises(tmp_path):
         p.preload()
 
 
+def test_pause_stops_the_decode_thread(video_file):
+    p = VideoPlayer(video_file)
+    p.preload()
+    p.start(now=0.0)
+    thread = p._thread
+    assert thread.is_alive()
+    try:
+        p.pause()
+        assert not thread.is_alive(), "pause() must stop the decode thread"
+        assert p._thread is None
+    finally:
+        p.stop()
+
+
+def test_restart_halts_previous_thread_not_orphans_it(video_file):
+    # Calling start() again must not leave a second decode thread racing on the container.
+    p = VideoPlayer(video_file)
+    p.preload()
+    p.start(now=0.0)
+    first = p._thread
+    try:
+        p.start(now=0.0)  # restart
+        assert p._thread is not first, "restart should spawn a fresh thread"
+        assert not first.is_alive(), "the previous decode thread must be halted, not orphaned"
+    finally:
+        p.stop()
+
+
+def test_start_after_pause_replays_from_top(video_file):
+    p = VideoPlayer(video_file)
+    p.preload()
+    p.start(now=0.0)
+    try:
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if p.frame_at(0.5).pts > 0.0:
+                break
+            time.sleep(0.01)
+        assert p.frame_at(0.5).pts > 0.0, "precondition: playback advanced past the first frame"
+        p.pause()
+        p.start(now=100.0)  # revisit the cue -> replay from the beginning
+        assert p.frame_at(100.0).pts == 0.0
+    finally:
+        p.stop()
+
+
 def test_stop_is_idempotent(video_file):
     p = VideoPlayer(video_file)
     p.preload()
