@@ -36,23 +36,35 @@ class PlaybackEngine:
                 self._fallback_player = None
 
     def start(self, index: int, adjacent: set[int], now: float) -> None:
-        player = self._factory(self._show.cues[index].source)
-        player.preload()
-        player.start(now)
-        self._players[index] = player
         self._current = index
+        try:
+            player = self._factory(self._show.cues[index].source)
+            player.preload()
+            player.start(now)
+            self._players[index] = player
+        except PlayerError as exc:
+            log.error("opening cue '%s' failed: %s", self._show.cues[index].id, exc)
+            self._failed.add(index)
+            self._engage_fallback(now)
         self._request_preloads(adjacent)
 
     def switch_to(self, index: int, adjacent: set[int], now: float) -> None:
         self._collect_finished_preloads()
-        player = self._players.get(index)
-        if player is None:
-            player = self._factory(self._show.cues[index].source)
-            player.preload()
-            self._players[index] = player
-        player.start(now)
         self._current = index
         self._on_fallback = False
+        player = self._players.get(index)
+        if player is None:
+            try:
+                player = self._factory(self._show.cues[index].source)
+                player.preload()
+                self._players[index] = player
+            except PlayerError as exc:
+                log.error("cue '%s' failed to load on switch: %s", self._show.cues[index].id, exc)
+                self._failed.add(index)
+                self._engage_fallback(now)
+                player = None
+        if player is not None:
+            player.start(now)
         keep = {index} | adjacent
         for i in [i for i in self._players if i not in keep]:
             self._players.pop(i).stop()
@@ -86,6 +98,21 @@ class PlaybackEngine:
         self._collect_finished_preloads()
         return not self._pending
 
+    def _engage_fallback(self, now: float) -> bool:
+        """Switch playback to the fallback video. Returns True if it engaged."""
+        if self._fallback_player is None:
+            return False
+        if not self._fallback_started:
+            try:
+                self._fallback_player.start(now)
+            except PlayerError as exc:
+                log.error("fallback video failed to start, freeze-frame only: %s", exc)
+                self._fallback_player = None
+                return False
+            self._fallback_started = True
+        self._on_fallback = True
+        return True
+
     def frame_at(self, now: float) -> Frame | None:
         source = None
         if self._on_fallback and self._fallback_player is not None:
@@ -98,11 +125,7 @@ class PlaybackEngine:
                 return self._last_frame
             except PlayerError as exc:
                 log.error("live playback failure: %s", exc)
-                if not self._on_fallback and self._fallback_player is not None:
-                    self._on_fallback = True
-                    if not self._fallback_started:
-                        self._fallback_player.start(now)
-                        self._fallback_started = True
+                if not self._on_fallback and self._engage_fallback(now):
                     return self.frame_at(now)
         return self._last_frame
 

@@ -1,8 +1,6 @@
 import time
 from pathlib import Path
 
-import pytest
-
 from visualgen.engine import PlaybackEngine
 from visualgen.player import Frame, PlayerError
 from visualgen.show import Cue, Show
@@ -131,4 +129,59 @@ def test_failed_async_preload_never_blocks_readiness():
     engine, made = make_engine(show=Show(cues))
     engine.start(0, {1}, now=0.0)
     assert wait_ready(engine), "a failed preload must not leave the FSM stuck in SWITCHING"
+    engine.stop()
+
+
+def test_bad_first_cue_engages_fallback_not_fatal():
+    cues = (
+        Cue("bad", Path("/fake/explodes-on-preload.mp4")),
+        Cue("ok", Path("/fake/1.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues))
+    engine.start(0, {1}, now=0.0)  # must not raise
+    frame = engine.frame_at(0.1)
+    assert frame is not None, "a failed opening cue must fall back, not go black"
+    assert made[Path("/fake/safe.mp4")].started
+    engine.stop()
+
+
+def test_bad_first_cue_without_fallback_returns_none_not_fatal():
+    cues = (
+        Cue("bad", Path("/fake/explodes-on-preload.mp4")),
+        Cue("ok", Path("/fake/1.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues), fallback=None)
+    engine.start(0, {1}, now=0.0)  # must not raise
+    assert engine.frame_at(0.1) is None  # nothing to show yet -> app clears to black
+    engine.stop()
+
+
+def test_switch_to_failing_cue_engages_fallback_not_fatal():
+    cues = (
+        Cue("ok", Path("/fake/0.mp4")),
+        Cue("bad", Path("/fake/explodes-on-preload.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues))
+    engine.start(0, {1}, now=0.0)
+    wait_ready(engine)
+    engine.frame_at(0.1)
+    engine.switch_to(1, {0}, now=1.0)  # must not raise even though cue 1 is broken
+    frame = engine.frame_at(0.2)
+    assert frame is not None
+    assert made[Path("/fake/safe.mp4")].started
+    engine.stop()
+
+
+def test_recovers_from_fallback_when_switching_to_good_cue():
+    cues = (
+        Cue("bad", Path("/fake/explodes-on-preload.mp4")),
+        Cue("ok", Path("/fake/1.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues))
+    engine.start(0, {1}, now=0.0)  # engages fallback
+    wait_ready(engine)
+    engine.switch_to(1, {0}, now=1.0)  # switch to the healthy cue
+    frame = engine.frame_at(1.1)
+    assert frame is not None
+    assert made[Path("/fake/1.mp4")].started, "must leave fallback and play the good cue"
     engine.stop()
