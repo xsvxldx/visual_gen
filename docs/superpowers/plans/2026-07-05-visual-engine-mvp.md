@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-05-visual-engine-mvp-design.md`
 
-## Progress (last updated 2026-07-07)
+## Progress (last updated 2026-07-08)
 
 Executing task-by-task with TDD. Each task: failing test → implement → green → commit.
 
@@ -20,18 +20,20 @@ Executing task-by-task with TDD. Each task: failing test → implement → green
 - [x] **Task 4** — CueManager FSM (`cues.py`) — commit `15b00f4`
 - [x] **Task 5** — Clock abstraction (`clock.py`) — commit `f6cebf7`
 - [x] **Task 6** — fullscreen window + solid-color renderer (**Milestone 1**) — commit `374fec6`, manually verified (dark-blue fullscreen, ESC exits)
-- [ ] **Task 7** — VideoPlayer: decode thread, ring buffer, seamless loop (`player.py`) ← **NEXT**
-- [ ] Task 8 — GPU YUV rendering + single-video playback (Milestone 2)
-- [ ] Task 9 — PlaybackEngine with preloading + fallback (`engine.py`)
-- [ ] Task 10 — wire it together + keyboard switching (Milestones 3–5)
-- [ ] Task 11 — MIDI input (Milestone 6)
-- [ ] Task 12 — live failure path verification (Milestone 7)
-- [ ] Task 13 — stability soak + operator docs (Milestone 8)
+- [x] **Task 7** — VideoPlayer: decode thread, ring buffer, seamless loop (`player.py`) — commit `5862cf7` (decoder thread-safety hardened in `6ba70ca`)
+- [x] **Task 8** — GPU YUV rendering + single-video playback (**Milestone 2**) — commit `b5f8745`
+- [x] **Task 9** — PlaybackEngine with preloading + fallback (`engine.py`) — commit `757b23b` (async-preload race fixed in `6ba70ca`; fallback now also engages on failed startup/switch preload)
+- [x] **Task 10** — wire it together + keyboard switching (**Milestones 3–5**) — commit `4b14750`
+- [x] **Task 11** — MIDI input (**Milestone 6**) — commit `46e8c64`
+- [x] **Task 12** — live failure path verification (**Milestone 7**) — commit `502ac69`
+- [x] **Task 13** — stability soak + operator docs (**Milestone 8**) — commit `2693abd`
 
-**State:** 27 tests green (`uv run pytest -q`), working tree clean. Tasks 1–5 are
-pure logic (fully unit-tested); Task 6 has no unit tests (needs a display) and was
-verified manually. Resume at **Task 7** below — it returns to automated tests (the
-fixture generates a real clip on the fly) and needs no display.
+**State:** 51 tests green (`uv run pytest -q`). All 13 MVP tasks implemented on
+`deepseek_branch`. Tasks 1–5 and 7–12 are covered by automated tests (the video
+fixtures generate real clips on the fly); Tasks 6 and 8 (GL rendering) have no unit
+tests — they need a display and are verified manually. Remaining before calling the
+MVP done: eyeball the GL render path (Task 8) on a real display, and run the
+switching soak (`scripts/soak_switching.py`, Task 13) for stability.
 
 ## Global Constraints
 
