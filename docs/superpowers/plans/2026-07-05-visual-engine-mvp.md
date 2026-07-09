@@ -28,12 +28,21 @@ Executing task-by-task with TDD. Each task: failing test → implement → green
 - [x] **Task 12** — live failure path verification (**Milestone 7**) — commit `502ac69`
 - [x] **Task 13** — stability soak + operator docs (**Milestone 8**) — commit `2693abd`
 
-**State:** 51 tests green (`uv run pytest -q`). All 13 MVP tasks implemented on
-`deepseek_branch`. Tasks 1–5 and 7–12 are covered by automated tests (the video
-fixtures generate real clips on the fly); Tasks 6 and 8 (GL rendering) have no unit
-tests — they need a display and are verified manually. Remaining before calling the
-MVP done: eyeball the GL render path (Task 8) on a real display, and run the
-switching soak (`scripts/soak_switching.py`, Task 13) for stability.
+**State (updated 2026-07-09):** 57 tests green (`uv run pytest -q`). All 13 MVP tasks
+implemented and merged to `main`. Since then, three live-reliability fixes landed:
+fallback on failed startup/switch preload (`f873695`), restart-safe player switching that
+fixed wrap-around corruption + MIDI log de-spam (`05972ca`), and decoder thread-safety
+(`6ba70ca`). GL render path verified headless (real frame through the real `Renderer`).
+Tasks 1–5 and 7–12 have automated tests; Tasks 6 and 8 (GL) are verified manually.
+
+**Remaining to call the MVP fully done:** run the switching soak
+(`scripts/soak_switching.py`, Task 13) end-to-end against real clips.
+
+**Post-MVP queue (do NOT start before the soak passes unless the operator asks):**
+1. **Cue recall** — spec **approved**, `docs/superpowers/specs/2026-07-09-cue-recall-design.md`.
+   Next concrete step: run `writing-plans` to produce an implementation plan, then build.
+2. **Transitions** — **draft, deferred**, `docs/superpowers/specs/2026-07-09-transitions-design.md`
+   (Sections 4–5 unfinished; resume brainstorming there).
 
 ## Global Constraints
 
