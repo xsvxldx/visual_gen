@@ -1,0 +1,20 @@
+# Optional config for visualgen. Because it sits next to show.yaml it is picked up
+# automatically; otherwise pass --config examples/config.yaml.
+# Delete this file entirely to use defaults (no fallback, first MIDI port, notes 60/61).
+
+# Fallback video: played automatically if any cue fails to load or decode mid-show.
+# Path is relative to THIS file's folder. Recommended for a live gig. Comment out if unused.
+fallback: clips/fallback.mp4
+
+midi:
+  # Name of the MIDI input to listen on. Leave `port` commented out to use the first
+  # available input (or none). Find real device names with:
+  #   uv run python -c "import mido; print(mido.get_input_names())"
+  # For the soak test, UNCOMMENT the line below (it must match the virtual port name):
+  # port: "visualgen-soak"
+
+  next:
+    note: 60        # note that advances to the next cue
+  previous:
+    note: 61        # note that returns to the previous cue
+    # channel: 0    # optional: restrict to one MIDI channel (0-15). Omit = any channel.

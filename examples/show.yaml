@@ -1,0 +1,18 @@
+# Cue list for visualgen. Run with:  uv run visualgen examples/show.yaml
+#
+# `source` paths are relative to THIS file's folder (examples/).
+# Drop your clips in examples/clips/ and edit the filenames below.
+# Rules enforced at startup: every source file must exist; every id must be unique.
+# You need at least 2 cues to see switching.
+
+show:
+  - id: horse
+    source: clips/horse.mp4
+  - id: montecarlo
+    source: clips/montecarlo.mp4
+  - id: onirofobia
+    source: clips/onirofobia.mp4
+
+# wrap: false (default) -> NEXT on the last cue and PREVIOUS on the first are ignored.
+# wrap: true            -> switching wraps around the ends.
+wrap: true

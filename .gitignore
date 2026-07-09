@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 .aider*
+
+# Operator clips live locally, never in the repo (can be very large)
+examples/clips/*
+!examples/clips/.gitkeep
