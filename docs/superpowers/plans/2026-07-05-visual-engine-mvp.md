@@ -35,10 +35,12 @@ fixed wrap-around corruption + MIDI log de-spam (`05972ca`), and decoder thread-
 (`6ba70ca`). GL render path verified headless (real frame through the real `Renderer`).
 Tasks 1–5 and 7–12 have automated tests; Tasks 6 and 8 (GL) are verified manually.
 
-**Remaining to call the MVP fully done:** run the switching soak
-(`scripts/soak_switching.py`, Task 13) end-to-end against real clips.
+**MVP fully done (2026-07-09):** the switching soak (`scripts/soak_switching.py`, Task 13)
+ran end-to-end against real clips — 500 rapid random NEXT/PREVIOUS switches, all clean, no
+freezes, no `avcodec` errors, no fallback engagement. The wrap-around corruption fix holds
+under sustained load. **MVP is complete.**
 
-**Post-MVP queue (do NOT start before the soak passes unless the operator asks):**
+**Post-MVP queue (soak has now passed — cue recall is cleared to start):**
 1. **Cue recall** — spec **approved**, `docs/superpowers/specs/2026-07-09-cue-recall-design.md`.
    Next concrete step: run `writing-plans` to produce an implementation plan, then build.
 2. **Transitions** — **draft, deferred**, `docs/superpowers/specs/2026-07-09-transitions-design.md`
