@@ -1,8 +1,10 @@
 import time
 from pathlib import Path
 
+import pytest
+
 from visualgen.engine import PlaybackEngine
-from visualgen.instruction import Single
+from visualgen.instruction import Single, TransitionMode
 from visualgen.player import Frame, PlayerError
 from visualgen.show import Cue, Show
 
@@ -146,6 +148,38 @@ def test_instruction_at_single_engages_fallback_on_failure():
     instr = engine.instruction_at(0.2)
     assert isinstance(instr, Single)
     assert made[Path("/fake/safe.mp4")].started
+    engine.stop()
+
+
+def test_engine_seeds_mode_and_duration_from_show():
+    show = Show(make_show().cues, transition=TransitionMode.CROSSFADE, duration=1.2)
+    engine, made = make_engine(show=show)
+    assert engine.mode is TransitionMode.CROSSFADE
+    assert engine.duration == 1.2
+    engine.stop()
+
+
+def test_cycle_mode_advances_and_wraps():
+    engine, made = make_engine()  # default show -> CUT
+    assert engine.mode is TransitionMode.CUT
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.DIP
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.CROSSFADE
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.WIPE
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.CUT
+    engine.stop()
+
+
+def test_adjust_duration_steps_and_floors_at_min():
+    show = Show(make_show().cues, duration=0.5)
+    engine, made = make_engine(show=show)
+    engine.adjust_duration(0.1)
+    assert engine.duration == pytest.approx(0.6)
+    engine.adjust_duration(-1.0)
+    assert engine.duration == pytest.approx(0.1)  # floored, never <= 0
     engine.stop()
 
 

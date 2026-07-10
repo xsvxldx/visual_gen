@@ -3,7 +3,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
-from visualgen.instruction import RenderInstruction, Single
+from visualgen.instruction import RenderInstruction, Single, TransitionMode
 from visualgen.player import Frame, PlayerError, VideoPlayer
 from visualgen.show import Show
 
@@ -19,6 +19,8 @@ class PlaybackEngine:
     ):
         self._show = show
         self._factory = player_factory
+        self._mode = show.transition  # session state, seeded from YAML; live keys mutate it
+        self._duration = show.duration
         self._players: dict[int, VideoPlayer] = {}
         self._pending: dict[int, Future] = {}
         self._failed: set[int] = set()
@@ -35,6 +37,25 @@ class PlaybackEngine:
             except PlayerError as exc:
                 log.error("fallback video failed to preload, freeze-frame only: %s", exc)
                 self._fallback_player = None
+
+    _MIN_DURATION = 0.1
+
+    @property
+    def mode(self) -> TransitionMode:
+        return self._mode
+
+    @property
+    def duration(self) -> float:
+        return self._duration
+
+    def cycle_mode(self) -> None:
+        """Advance the base blend: cut -> dip -> crossfade -> wipe -> cut. Session-only."""
+        modes = list(TransitionMode)
+        self._mode = modes[(modes.index(self._mode) + 1) % len(modes)]
+
+    def adjust_duration(self, delta: float) -> None:
+        """Nudge the transition duration, floored at _MIN_DURATION. Session-only."""
+        self._duration = round(max(self._MIN_DURATION, self._duration + delta), 3)
 
     def start(self, index: int, adjacent: set[int], now: float) -> None:
         self._current = index
