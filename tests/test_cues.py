@@ -74,3 +74,37 @@ def test_adjacent_single_cue():
 def test_requires_at_least_one_cue():
     with pytest.raises(ValueError):
         CueManager(0)
+
+
+def test_recall_with_no_history_returns_none():
+    cm = CueManager(3)
+    assert cm.handle(Command.RECALL) is None
+    assert cm.index == 0
+    assert cm.state is State.PLAYING
+
+
+def test_recall_returns_the_previously_left_cue():
+    cm = CueManager(3)
+    cm.handle(Command.NEXT)  # 0 -> 1
+    cm.complete_switch()
+    assert cm.handle(Command.RECALL) == 0
+    assert cm.index == 0
+    assert cm.state is State.SWITCHING
+
+
+def test_recall_toggles_between_the_ab_pair():
+    cm = CueManager(3)
+    cm.handle(Command.NEXT)  # 0 -> 1
+    cm.complete_switch()
+    assert cm.handle(Command.RECALL) == 0  # back to 0
+    cm.complete_switch()
+    assert cm.handle(Command.RECALL) == 1  # toggle back to 1
+    cm.complete_switch()
+    assert cm.handle(Command.RECALL) == 0  # and back again
+
+
+def test_recall_ignored_while_switching():
+    cm = CueManager(3)
+    cm.handle(Command.NEXT)  # enters SWITCHING
+    assert cm.handle(Command.RECALL) is None
+    assert cm.index == 1

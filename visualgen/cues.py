@@ -17,6 +17,7 @@ class CueManager:
         self._count = cue_count
         self._wrap = wrap
         self._index = 0
+        self._previous: int | None = None
         self._state = State.PLAYING
 
     @property
@@ -30,6 +31,13 @@ class CueManager:
     def handle(self, command: Command) -> int | None:
         if self._state is State.SWITCHING:
             return None
+        if command is Command.RECALL:
+            if self._previous is None:
+                return None
+            target = self._previous
+            self._previous, self._index = self._index, self._previous
+            self._state = State.SWITCHING
+            return target
         delta = 1 if command is Command.NEXT else -1
         target = self._index + delta
         if self._wrap:
@@ -38,6 +46,7 @@ class CueManager:
             return None
         if target == self._index:
             return None
+        self._previous = self._index
         self._index = target
         self._state = State.SWITCHING
         return target
