@@ -227,6 +227,20 @@ deliberately-broken target cue during a transition lands on the fallback with no
 
 ## Deferred to a later cycle (recorded, not designed here)
 
+- **`tail_dissolve` type (self-contained, zero-decode):** on switch, freeze the on-screen frame
+  (A-current, already held in the engine as `_last_frame`) and crossfade it to A's own **last
+  frame** (A-last, a single still fetched once — grab it at preload time so it's ready), then
+  hard-cut to B. During the crossfade window **no video decodes** — both blend endpoints are held
+  stills — so it is cheaper than the base `crossfade` (B starts only at the cut, like a normal
+  cut). Fits the render seam with **no renderer changes** (`Blend(A_current, A_last, t,
+  crossfade)` → `Single(B)`), but it is a *new type*, not one of the four base modes: it is a
+  two-phase transition with its own engine orchestration (no live decode during the window; the
+  `to` endpoint is A's own last frame, not B). Structurally it is the same multi-phase shape as
+  morph (blend into a bridge, then hand off to B) with A-last standing in for the pre-rendered
+  clip — so it is a natural stepping stone to build right after the multi-phase orchestration
+  lands, validating that shape before the clip machinery exists. (Variant, not chosen: let A keep
+  *playing* and dissolve live motion into its frozen last frame — one live stream instead of
+  zero.)
 - **Morph-bridge type:** pre-rendered ComfyUI clip played as a bridge between an A→B pair;
   `morph_next` / `morph_prev` YAML per direction; morph preloading; the crossfade-in / clip-body
   / handoff-to-B orchestration; the authoring contract (morph[0] = A.last, morph[last] = B.first;
