@@ -1,7 +1,7 @@
 # Cue Recall (undo-last-switch) — Design
 
 **Date:** 2026-07-09
-**Status:** Approved for planning
+**Status:** Implemented & merged to `main` (2026-07-10) — plan `docs/superpowers/plans/2026-07-09-cue-recall.md`
 **Related:** `AGENTS.md`, MVP design `docs/superpowers/specs/2026-07-05-visual-engine-mvp-design.md`
 
 ## Problem

@@ -240,11 +240,12 @@ Do not implement roadmap items before the MVP is complete unless explicitly requ
 ## Design status (captured 2026-07-09)
 
 - **Cue recall (undo-last-switch)** — small operator feature (keyboard `DOWN` returns to the
-  cue you just left, resumed at its position; toggles A/B). Explicitly requested. Spec
-  **approved**: `docs/superpowers/specs/2026-07-09-cue-recall-design.md`. Next: write the
-  implementation plan, then build. This is the next work item after the MVP soak.
+  cue you just left, resumed at its position; toggles A/B). Explicitly requested. **DONE &
+  merged to `main` (2026-07-10)**: spec `docs/superpowers/specs/2026-07-09-cue-recall-design.md`,
+  plan `docs/superpowers/plans/2026-07-09-cue-recall.md`. Built via TDD; the resume timing path
+  needed several review-driven fixes (see the plan/auto-memory). Operator-confirmed on hardware.
 - **Transitions** (roadmap #1–3: crossfades, shader pipeline, effect chaining) — **draft,
-  deferred** until the MVP is stable: `docs/superpowers/specs/2026-07-09-transitions-design.md`.
+  deferred**, now the next post-MVP item: `docs/superpowers/specs/2026-07-09-transitions-design.md`.
   Sections 1–3 settled; Sections 4 (morph specifics) and 5 (testing) unfinished — resume there.
 
 ---

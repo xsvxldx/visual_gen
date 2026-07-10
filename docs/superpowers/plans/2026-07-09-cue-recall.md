@@ -1,5 +1,7 @@
 # Cue Recall (undo-last-switch) Implementation Plan
 
+> **STATUS: DONE & merged to `main` (2026-07-10).** All 5 tasks implemented via subagent-driven TDD, then hardened with four review-driven fixes to the resume timing path (hold-during-catch-up, pause-records-on-screen-frame + loop-wrap release, seek-failure→fallback, `_epoch` re-anchor at reveal). 69 tests green; operator-confirmed on hardware. The task checkboxes below are left unchecked as the historical plan of record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a keyboard `DOWN` "recall" control that returns to the cue the operator was just on, resumed at the exact frame it was showing when they left it, toggling A/B on repeated presses.

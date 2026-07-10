@@ -6,10 +6,10 @@
 - Implementation plan: `docs/superpowers/plans/2026-07-05-visual-engine-mvp.md`
 
 Post-MVP designs (see each file for status):
-- Cue recall (undo-last-switch): `docs/superpowers/specs/2026-07-09-cue-recall-design.md` — **approved, next up**; needs an implementation plan (run `writing-plans`), then implement.
-- Transitions: `docs/superpowers/specs/2026-07-09-transitions-design.md` — **draft, deferred** until the MVP soak passes; Sections 4–5 unfinished.
+- Cue recall (undo-last-switch): `docs/superpowers/specs/2026-07-09-cue-recall-design.md` — **DONE & merged** (plan `docs/superpowers/plans/2026-07-09-cue-recall.md`); keyboard `DOWN` resumes the just-left cue at position, toggles A/B.
+- Transitions: `docs/superpowers/specs/2026-07-09-transitions-design.md` — **draft, deferred**, now the next post-MVP item; Sections 4–5 unfinished.
 
-Current status lives in the plan's **Progress** section and in auto-memory `visualgen-mvp-progress`. MVP is code-complete (57 tests); the switching soak has not been run end-to-end.
+Current status lives in the plan's **Progress** section and in auto-memory `visualgen-mvp-progress`. MVP is complete and the switching soak passed; cue recall is merged (69 tests).
 
 Ground rules from AGENTS.md that always apply:
 
