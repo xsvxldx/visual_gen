@@ -43,6 +43,8 @@ class VideoPlayer:
         self._time_base = None
         self._epoch: float = 0.0
         self._current: Frame | None = None
+        self._resume_pts: float = 0.0
+        self._hold: Frame | None = None
         self.first_frame: Frame | None = None
 
     def preload(self) -> None:
@@ -59,8 +61,13 @@ class VideoPlayer:
         self.first_frame = _convert(first, self._time_base)
         self._frames.put(self.first_frame)
 
-    def start(self, now: float) -> None:
-        """Begin (or restart) continuous decoding from the top of the clip.
+    def start(self, now: float, resume: bool = False) -> None:
+        """Begin (or restart) continuous decoding.
+
+        resume=False (default): replay from the top of the clip.
+        resume=True: seek back to the frame the operator left on (recorded by
+        pause()) and resume there, holding that frame on screen until the
+        decoder catches up.
 
         Restart-safe: any running decode thread is halted first, so a cue that is
         revisited never ends up with two threads racing on the same container.
@@ -70,16 +77,27 @@ class VideoPlayer:
         self._halt()
         self._drain()
         if self._container is not None:
-            self._container.seek(0)  # replay from the start (safe: no decode thread running)
+            if resume:
+                self._container.seek(int(self._resume_pts * 1_000_000))
+            else:
+                self._container.seek(0)  # replay from the start
         self._current = None
+        if not resume:
+            self._hold = None
         self._error = None
-        self._epoch = now
+        self._epoch = now - self._resume_pts if resume else now
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._decode_loop, daemon=True)
         self._thread.start()
 
     def pause(self) -> None:
-        """Stop decoding but keep the container open so start() can resume instantly."""
+        """Stop decoding but keep the container open so start() can resume instantly.
+
+        Records where we were (the current frame and its pts) so a later
+        start(resume=True) can pick up from exactly here.
+        """
+        self._resume_pts = self._current.pts if self._current is not None else 0.0
+        self._hold = self._current
         self._halt()
 
     def _halt(self) -> None:
@@ -129,7 +147,7 @@ class VideoPlayer:
                 self._current = self._frames.get_nowait()
             else:
                 break
-        result = self._current or self.first_frame
+        result = self._current or self._hold or self.first_frame
         assert result is not None, "frame_at() before preload()"
         return result
 

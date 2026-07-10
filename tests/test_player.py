@@ -131,3 +131,32 @@ def test_stop_is_idempotent(video_file):
     p.start(now=0.0)
     p.stop()
     p.stop()
+
+
+def test_start_resume_replays_from_left_position(video_file):
+    p = VideoPlayer(video_file)
+    p.preload()
+    p.start(now=0.0)
+    try:
+        # advance past the first frame so there is a non-zero position to resume from
+        deadline = time.monotonic() + 2.0
+        left = None
+        while time.monotonic() < deadline:
+            f = p.frame_at(0.2)
+            if f.pts > 0.0:
+                left = f
+                break
+            time.sleep(0.01)
+        assert left is not None and left.pts > 0.0, "precondition: playback advanced"
+
+        p.pause()
+        assert p._resume_pts == left.pts, "pause() records the frame it was left on"
+        assert p._hold is left, "pause() holds the exact frame for display during catch-up"
+
+        p.start(now=100.0, resume=True)
+        # the held frame is shown immediately at the resume position (not from the top),
+        # even before the decoder produces the resume frame
+        shown = p.frame_at(100.0)
+        assert shown.pts == left.pts
+    finally:
+        p.stop()
