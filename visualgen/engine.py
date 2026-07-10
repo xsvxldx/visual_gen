@@ -48,7 +48,7 @@ class PlaybackEngine:
             self._engage_fallback(now)
         self._request_preloads(adjacent)
 
-    def switch_to(self, index: int, adjacent: set[int], now: float) -> None:
+    def switch_to(self, index: int, adjacent: set[int], now: float, resume: bool = False) -> None:
         self._collect_finished_preloads()
         prev = self._current
         self._current = index
@@ -67,7 +67,7 @@ class PlaybackEngine:
                 self._engage_fallback(now)
                 player = None
         if player is not None:
-            player.start(now)
+            player.start(now, resume=resume)
         keep = {index} | adjacent
         for i in [i for i in self._players if i not in keep]:
             self._players.pop(i).stop()

@@ -23,17 +23,19 @@ class FakePlayer:
         self.running = False
         self.double_started = False  # start() called while already running -> would spawn a 2nd decode thread
         self.pause_count = 0
+        self.resumed = False  # last value of the resume flag passed to start()
 
     def preload(self):
         if self.source.name == "explodes-on-preload.mp4":
             raise PlayerError("boom")
         self.preloaded = True
 
-    def start(self, now):
+    def start(self, now, resume=False):
         if self.running:
             self.double_started = True
         self.running = True
         self.started = True
+        self.resumed = resume
 
     def pause(self):
         self.running = False
@@ -223,4 +225,16 @@ def test_recovers_from_fallback_when_switching_to_good_cue():
     frame = engine.frame_at(1.1)
     assert frame is not None
     assert made[Path("/fake/1.mp4")].started, "must leave fallback and play the good cue"
+    engine.stop()
+
+
+def test_switch_to_resume_passes_resume_flag_to_target():
+    engine, made = make_engine(show=Show(make_show(3).cues, wrap=True))
+    engine.start(0, {1, 2}, now=0.0)
+    assert wait_ready(engine)
+    engine.switch_to(1, {0, 2}, now=1.0)  # normal switch: from the top
+    assert made[Path("/fake/1.mp4")].resumed is False
+    assert wait_ready(engine)
+    engine.switch_to(0, {1, 2}, now=2.0, resume=True)  # recall: resume cue 0
+    assert made[Path("/fake/0.mp4")].resumed is True
     engine.stop()
