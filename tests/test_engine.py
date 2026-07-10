@@ -234,6 +234,19 @@ def test_transition_finalizes_to_single_after_duration():
     engine.stop()
 
 
+def test_dip_and_wipe_modes_are_carried_on_the_blend():
+    for mode in (TransitionMode.DIP, TransitionMode.WIPE):
+        show = Show(make_show().cues, transition=mode, duration=1.0)
+        engine, made = make_engine(show=show)
+        engine.start(0, {1}, now=0.0)
+        assert wait_ready(engine)
+        engine.switch_to(1, {0, 2}, now=1.0)
+        instr = engine.instruction_at(1.5)
+        assert isinstance(instr, Blend)
+        assert instr.mode is mode
+        engine.stop()
+
+
 def test_cut_mode_completes_immediately_without_a_blend():
     engine, made = make_engine()  # default show -> CUT
     engine.start(0, {1}, now=0.0)

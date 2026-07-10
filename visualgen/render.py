@@ -36,8 +36,8 @@ void main() {
 """
 
 # Two-frame blend. Mirrors the YUV->RGB of _FRAGMENT for each of two frames,
-# then mixes per mode. mode ints match TransitionMode order (dip=1, crossfade=2, wipe=3);
-# cut never reaches here (the engine emits a Single for a cut).
+# then mixes per mode: dip=1 (through black), crossfade=2 (dissolve), wipe=3
+# (moving left-to-right edge). cut never reaches here (the engine emits a Single).
 _BLEND_FRAGMENT = """
 #version 330
 uniform sampler2D from_y;
@@ -63,8 +63,18 @@ vec3 yuv2rgb(sampler2D ty, sampler2D tu, sampler2D tv) {
 void main() {
     vec3 a = yuv2rgb(from_y, from_u, from_v);
     vec3 b = yuv2rgb(to_y, to_u, to_v);
-    // crossfade (default): linear dissolve
-    fragColor = vec4(mix(a, b, u_t), 1.0);
+    vec3 rgb;
+    if (u_mode == 1) {
+        // dip through black: a fades out over the first half, b fades up over the second
+        rgb = u_t < 0.5 ? a * (1.0 - 2.0 * u_t) : b * (2.0 * u_t - 1.0);
+    } else if (u_mode == 3) {
+        // wipe: hard left-to-right edge reveals b over a
+        rgb = uv.x < u_t ? b : a;
+    } else {
+        // crossfade: linear dissolve
+        rgb = mix(a, b, u_t);
+    }
+    fragColor = vec4(rgb, 1.0);
 }
 """
 
