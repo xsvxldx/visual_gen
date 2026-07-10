@@ -247,6 +247,31 @@ def test_dip_and_wipe_modes_are_carried_on_the_blend():
         engine.stop()
 
 
+def test_incoming_failure_mid_transition_aborts_to_fallback():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.3)  # blend underway
+    made[Path("/fake/1.mp4")].fail_on_frame = True  # the incoming cue dies
+    instr = engine.instruction_at(1.5)
+    assert isinstance(instr, Single), "no partial blend may survive a failure"
+    assert made[Path("/fake/safe.mp4")].started, "incoming death engages the fallback"
+    assert engine.transition_complete(), "must not stay stuck in a transition"
+    engine.stop()
+
+
+def test_outgoing_failure_mid_transition_finalizes_to_incoming():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.3)  # blend underway
+    made[Path("/fake/0.mp4")].fail_on_frame = True  # the outgoing cue dies
+    instr = engine.instruction_at(1.5)
+    assert isinstance(instr, Single)
+    assert instr.frame is made[Path("/fake/1.mp4")].own_frame, "hard-cut to the healthy destination"
+    assert not made[Path("/fake/safe.mp4")].started, "destination healthy -> no fallback"
+    assert engine.transition_complete()
+    engine.stop()
+
+
 def test_cut_mode_completes_immediately_without_a_blend():
     engine, made = make_engine()  # default show -> CUT
     engine.start(0, {1}, now=0.0)

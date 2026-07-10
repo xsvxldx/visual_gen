@@ -209,8 +209,25 @@ class PlaybackEngine:
         if from_player is None or to_player is None:
             self._finalize_transition()
             return None
-        from_frame = from_player.frame_at(now)
-        to_frame = to_player.frame_at(now)
+        try:
+            to_frame = to_player.frame_at(now)
+        except PlayerError as exc:
+            # Incoming cue died: abort the blend and drop to the fallback ladder. The switch
+            # is already committed, so we do not return to the outgoing cue.
+            log.error("incoming cue '%s' failed mid-transition: %s", self._show.cues[t.to_index].id, exc)
+            self._failed.add(t.to_index)
+            self._finalize_transition()  # clears transition and pauses the outgoing decoder
+            self._engage_fallback(now)
+            return None
+        try:
+            from_frame = from_player.frame_at(now)
+        except PlayerError as exc:
+            # Outgoing cue died: it is the side we are leaving, so hard-cut the blend to the
+            # healthy destination — no fallback needed.
+            log.error("outgoing cue '%s' failed mid-transition: %s", self._show.cues[t.from_index].id, exc)
+            self._finalize_transition()
+            self._last_frame = to_frame
+            return None
         self._last_frame = to_frame
         return Blend(from_frame, to_frame, max(0.0, min(1.0, progress)), t.mode)
 
