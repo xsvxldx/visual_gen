@@ -9,7 +9,7 @@ import moderngl
 
 from visualgen import window
 from visualgen.clock import VsyncClock
-from visualgen.commands import Command
+from visualgen.commands import Command, apply_transition_command
 from visualgen.config import ConfigError, load_config
 from visualgen.cues import CueManager, State
 from visualgen.engine import PlaybackEngine
@@ -65,6 +65,12 @@ def run(show_path: Path, config_path: Path) -> int:
                 commands.put(Command.PREVIOUS)
             elif key == glfw.KEY_DOWN:
                 commands.put(Command.RECALL)
+            elif key == glfw.KEY_T:
+                commands.put(Command.CYCLE_TRANSITION)
+            elif key == glfw.KEY_RIGHT_BRACKET:
+                commands.put(Command.DURATION_UP)
+            elif key == glfw.KEY_LEFT_BRACKET:
+                commands.put(Command.DURATION_DOWN)
 
         glfw.set_key_callback(win, on_key)
 
@@ -78,6 +84,8 @@ def run(show_path: Path, config_path: Path) -> int:
                     command = commands.get_nowait()
                 except queue.Empty:
                     break
+                if apply_transition_command(engine, command):
+                    continue  # live parameter tweak, not a cue move
                 target = cue_manager.handle(command)
                 if target is not None:
                     resume = command is Command.RECALL
