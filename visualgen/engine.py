@@ -67,7 +67,12 @@ class PlaybackEngine:
                 self._engage_fallback(now)
                 player = None
         if player is not None:
-            player.start(now, resume=resume)
+            try:
+                player.start(now, resume=resume)
+            except PlayerError as exc:
+                log.error("cue '%s' failed to start: %s", self._show.cues[index].id, exc)
+                self._failed.add(index)
+                self._engage_fallback(now)
         keep = {index} | adjacent
         for i in [i for i in self._players if i not in keep]:
             self._players.pop(i).stop()

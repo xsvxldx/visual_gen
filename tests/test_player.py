@@ -125,6 +125,16 @@ def test_start_after_pause_replays_from_top(video_file):
         p.stop()
 
 
+def test_start_surfaces_seek_failure_as_player_error(video_file):
+    p = VideoPlayer(video_file)
+    p.preload()
+    p._container.close()  # container is now unusable -> the seek in start() must fail
+    with pytest.raises(PlayerError):
+        p.start(now=0.0)
+    # start() raised before spawning a decode thread, and the container is already
+    # closed, so there is nothing for stop() to do here.
+
+
 def test_stop_is_idempotent(video_file):
     p = VideoPlayer(video_file)
     p.preload()

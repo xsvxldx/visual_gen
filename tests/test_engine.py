@@ -20,6 +20,7 @@ class FakePlayer:
         self.started = False
         self.stopped = False
         self.fail_on_frame = False
+        self.fail_on_start = False  # makes start() raise PlayerError, like a seek failure
         self.running = False
         self.double_started = False  # start() called while already running -> would spawn a 2nd decode thread
         self.pause_count = 0
@@ -31,6 +32,8 @@ class FakePlayer:
         self.preloaded = True
 
     def start(self, now, resume=False):
+        if self.fail_on_start:
+            raise PlayerError("seek failed")
         if self.running:
             self.double_started = True
         self.running = True
@@ -179,6 +182,22 @@ def test_switch_to_failing_cue_engages_fallback_not_fatal():
     wait_ready(engine)
     engine.frame_at(0.1)
     engine.switch_to(1, {0}, now=1.0)  # must not raise even though cue 1 is broken
+    frame = engine.frame_at(0.2)
+    assert frame is not None
+    assert made[Path("/fake/safe.mp4")].started
+    engine.stop()
+
+
+def test_switch_to_start_failure_engages_fallback_not_fatal():
+    # Unlike test_switch_to_failing_cue_engages_fallback_not_fatal (preload failure),
+    # this covers a target player that preloads fine but fails during start() itself
+    # (e.g. a seek failure) -> switch_to must not raise, and must fall back.
+    engine, made = make_engine()
+    engine.start(0, {1}, now=0.0)
+    wait_ready(engine)
+    engine.frame_at(0.1)
+    made[Path("/fake/1.mp4")].fail_on_start = True
+    engine.switch_to(1, {0}, now=1.0)  # must not raise even though cue 1 fails to start
     frame = engine.frame_at(0.2)
     assert frame is not None
     assert made[Path("/fake/safe.mp4")].started

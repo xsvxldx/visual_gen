@@ -77,10 +77,13 @@ class VideoPlayer:
         self._halt()
         self._drain()
         if self._container is not None:
-            if resume:
-                self._container.seek(int(self._resume_pts * 1_000_000))
-            else:
-                self._container.seek(0)  # replay from the start
+            try:
+                if resume:
+                    self._container.seek(int(self._resume_pts * 1_000_000))
+                else:
+                    self._container.seek(0)  # replay from the start
+            except Exception as exc:
+                raise PlayerError(f"{self._source}: seek failed: {exc}") from exc
         self._current = None
         if not resume:
             self._hold = None

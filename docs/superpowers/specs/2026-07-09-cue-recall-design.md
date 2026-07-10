@@ -100,8 +100,9 @@ DOWN key -> Command.RECALL -> CueManager.handle():
 
 ## Error handling / reliability
 
-- A resume seek that fails raises `PlayerError`, which routes to the existing
-  fallback → freeze-frame ladder in `PlaybackEngine.frame_at`. No new failure surface.
+- A resume seek that fails raises `PlayerError` from `start()`, which `switch_to` catches
+  and routes to the existing fallback → freeze-frame ladder — on both the resume and
+  normal switch paths. No new failure surface.
 - `start()` is already restart-safe (halts any running decode thread first), so recall
   introduces no new thread/race concerns.
 - Resume near end-of-clip is fine: catch-up reaches the target, then the normal EOF→seek(0)
