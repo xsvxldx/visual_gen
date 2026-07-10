@@ -256,3 +256,39 @@ def test_resume_hold_releases_if_decoder_wraps_before_reaching_resume(video_file
     p._frames.put(synth(0.0))
     p.frame_at(now)
     assert not p._resuming, "loop-wrap during catch-up must release the hold"
+
+
+def test_resume_reveal_reanchors_clock_no_post_catchup_fast_forward(video_file):
+    # After a catch-up that consumed real wall time, revealing live playback must
+    # resume at 1x cadence from the revealed frame -- NOT fast-forward to erase the
+    # wall time spent decoding (which _epoch anchored at start() would cause).
+    import numpy as np
+
+    def synth(pts):
+        z = np.zeros((2, 2), dtype=np.uint8)
+        return Frame(pts, 2, 2, z, z, z)
+
+    p = VideoPlayer(video_file)
+    p.preload()
+    p._hold = synth(0.40)
+    p._resume_pts = 0.40
+    p._resuming = True
+    p._current = None
+    start_now = 100.0
+    p._epoch = start_now - 0.40  # as start(resume=True) sets it
+
+    # Catch-up took 0.5 s of wall time; the decoder now produces the resume frame.
+    reveal_now = start_now + 0.5
+    p._frames.put(synth(0.40))
+    live = p.frame_at(reveal_now)
+    assert live.pts == 0.40 and not p._resuming
+
+    # The next frame must NOT be shown until real time actually passes -- proving the
+    # clock was re-anchored (buggy code, still anchored at start, would jump to it now).
+    p._frames.put(synth(0.4333))
+    still = p.frame_at(reveal_now)
+    assert still.pts == 0.40, "must not fast-forward at reveal; advance only with real time"
+
+    # After ~1 frame-time of real wall clock, playback advances by ~1 frame.
+    later = p.frame_at(reveal_now + 0.05)
+    assert later.pts == 0.4333

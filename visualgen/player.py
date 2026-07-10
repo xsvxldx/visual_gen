@@ -160,6 +160,7 @@ class VideoPlayer:
         if self._resuming:
             if self._current is not None and self._current.pts >= self._resume_pts:
                 self._resuming = False  # decoder reached the resume point -> go live
+                self._epoch = now - self._current.pts  # re-anchor: catch-up time must not replay as fast-forward
             else:
                 # Still decoding forward from the keyframe. Keep the left-on frame
                 # frozen instead of revealing the fast-forward catch-up frames.
