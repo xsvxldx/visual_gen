@@ -1,13 +1,25 @@
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from visualgen.instruction import RenderInstruction, Single, TransitionMode
+from visualgen.instruction import Blend, RenderInstruction, Single, TransitionMode
 from visualgen.player import Frame, PlayerError, VideoPlayer
 from visualgen.show import Show
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class _Transition:
+    """An in-flight blend from one cue to another, driven by the wall clock."""
+
+    from_index: int
+    to_index: int
+    start: float
+    duration: float
+    mode: TransitionMode
 
 
 class PlaybackEngine:
@@ -26,6 +38,7 @@ class PlaybackEngine:
         self._failed: set[int] = set()
         self._pool = ThreadPoolExecutor(max_workers=2)
         self._current: int | None = None
+        self._transition: _Transition | None = None
         self._last_frame: Frame | None = None
         self._fallback_player: VideoPlayer | None = None
         self._fallback_started = False
@@ -75,8 +88,7 @@ class PlaybackEngine:
         prev = self._current
         self._current = index
         self._on_fallback = False
-        if prev is not None and prev != index and prev in self._players:
-            self._players[prev].pause()  # only the incoming cue decodes continuously
+        from_player = self._players.get(prev) if prev is not None and prev != index else None
         player = self._players.get(index)
         if player is None:
             try:
@@ -95,10 +107,26 @@ class PlaybackEngine:
                 log.error("cue '%s' failed to start: %s", self._show.cues[index].id, exc)
                 self._failed.add(index)
                 self._engage_fallback(now)
+        if self._should_blend(from_player, player):
+            # Keep both players decoding for the window; the outgoing one is paused at finalize.
+            self._transition = _Transition(prev, index, now, self._duration, self._mode)
+        else:
+            self._transition = None
+            if from_player is not None:
+                from_player.pause()  # instant cut: only the incoming cue decodes continuously
         keep = {index} | adjacent
         for i in [i for i in self._players if i not in keep]:
             self._players.pop(i).stop()
         self._request_preloads(adjacent)
+
+    def _should_blend(self, from_player: VideoPlayer | None, to_player: VideoPlayer | None) -> bool:
+        return (
+            self._mode is not TransitionMode.CUT
+            and self._duration > 0
+            and from_player is not None
+            and to_player is not None
+            and not self._on_fallback  # target fell back -> nothing healthy to blend into
+        )
 
     def _request_preloads(self, indices: set[int]) -> None:
         for i in indices:
@@ -161,8 +189,43 @@ class PlaybackEngine:
 
     def instruction_at(self, now: float) -> RenderInstruction | None:
         """The render seam: what the renderer should draw this frame."""
+        self._collect_finished_preloads()  # keep neighbour preloads landing during the window
+        if self._transition is not None and not self._on_fallback:
+            blend = self._blend_at(now)
+            if blend is not None:
+                return blend
         frame = self.frame_at(now)
         return Single(frame) if frame is not None else None
+
+    def _blend_at(self, now: float) -> Blend | None:
+        """Emit the blend for the active transition, or finalize it and return None."""
+        t = self._transition
+        progress = 1.0 if t.duration <= 0 else (now - t.start) / t.duration
+        if progress >= 1.0:
+            self._finalize_transition()
+            return None
+        from_player = self._players.get(t.from_index)
+        to_player = self._players.get(t.to_index)
+        if from_player is None or to_player is None:
+            self._finalize_transition()
+            return None
+        from_frame = from_player.frame_at(now)
+        to_frame = to_player.frame_at(now)
+        self._last_frame = to_frame
+        return Blend(from_frame, to_frame, max(0.0, min(1.0, progress)), t.mode)
+
+    def _finalize_transition(self) -> None:
+        """End the window: pause the outgoing player, revert to the single-decoder rule."""
+        t = self._transition
+        self._transition = None
+        if t is None:
+            return
+        from_player = self._players.get(t.from_index)
+        if from_player is not None:
+            from_player.pause()
+
+    def transition_complete(self) -> bool:
+        return self._transition is None
 
     def stop(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)

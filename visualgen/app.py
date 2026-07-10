@@ -83,7 +83,11 @@ def run(show_path: Path, config_path: Path) -> int:
                     resume = command is Command.RECALL
                     engine.switch_to(target, cue_manager.adjacent(), clock.now(), resume=resume)
 
-            if cue_manager.state is State.SWITCHING and engine.preloads_ready():
+            if (
+                cue_manager.state is State.SWITCHING
+                and engine.transition_complete()
+                and engine.preloads_ready()
+            ):
                 cue_manager.complete_switch()
 
             instruction = engine.instruction_at(clock.now())
