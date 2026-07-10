@@ -98,11 +98,15 @@ class VideoPlayer:
     def pause(self) -> None:
         """Stop decoding but keep the container open so start() can resume instantly.
 
-        Records where we were (the current frame and its pts) so a later
-        start(resume=True) can pick up from exactly here.
+        Records the frame currently ON SCREEN so a later start(resume=True) picks up
+        from exactly there. During a resume catch-up the on-screen frame is the held
+        left-on frame (_hold), not _current -- which is the decoder's off-screen
+        catch-up cursor. Recording _current there would resume from a position the
+        operator never saw.
         """
-        self._resume_pts = self._current.pts if self._current is not None else 0.0
-        self._hold = self._current
+        shown = self._hold if self._resuming else self._current
+        self._resume_pts = shown.pts if shown is not None else 0.0
+        self._hold = shown
         self._halt()
 
     def _halt(self) -> None:
@@ -148,6 +152,7 @@ class VideoPlayer:
                 break
             if self._current is not None and head.pts < self._current.pts:
                 self._epoch = now
+                self._resuming = False  # decoder looped before reaching resume -> go live
             if self._epoch + head.pts <= now:
                 self._current = self._frames.get_nowait()
             else:

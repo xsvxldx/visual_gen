@@ -206,3 +206,53 @@ def test_resume_holds_left_frame_until_decoder_reaches_it(video_file):
     live = p.frame_at(now)
     assert live.pts == 0.40, "reveals live playback at the resume point"
     assert not p._resuming, "catch-up complete -> live"
+
+
+def test_pause_during_resume_records_the_on_screen_frame_not_the_catch_up_cursor(video_file):
+    # If the operator switches away from a cue while it is still SILENTLY catching up
+    # from a recall (_resuming True), pause() must record the frame they were actually
+    # seeing (the held left-on frame) -- NOT the decoder's internal catch-up cursor
+    # (_current), which is off-screen. Otherwise the next recall of this cue jumps to
+    # the wrong position: the same invisible-jump failure the resume fix removed.
+    import numpy as np
+
+    def synth(pts):
+        z = np.zeros((2, 2), dtype=np.uint8)
+        return Frame(pts, 2, 2, z, z, z)
+
+    p = VideoPlayer(video_file)
+    p.preload()
+    left = synth(0.40)
+    p._hold = left
+    p._resume_pts = 0.40
+    p._resuming = True
+    p._current = synth(0.15)  # the decoder's catch-up cursor -- never shown on screen
+
+    p.pause()
+    assert p._resume_pts == 0.40, "must keep the on-screen left-on position, not the cursor"
+    assert p._hold is left
+
+
+def test_resume_hold_releases_if_decoder_wraps_before_reaching_resume(video_file):
+    # Safety net: a valid resume pts is always reached by decoding forward, but we must
+    # never freeze the held frame for a whole clip loop in a live show. If the decoder
+    # ever loops (EOF -> seek 0, pts drops) before reaching the resume point, release the
+    # hold and go live rather than holding until the next lap comes around.
+    import numpy as np
+
+    def synth(pts):
+        z = np.zeros((2, 2), dtype=np.uint8)
+        return Frame(pts, 2, 2, z, z, z)
+
+    p = VideoPlayer(video_file)
+    p.preload()
+    p._hold = synth(0.40)
+    p._resume_pts = 0.40
+    p._resuming = True
+    p._current = synth(0.30)  # cursor advanced but not yet at the resume point
+    now = 100.0
+    p._epoch = now - 0.40
+    # Decoder wraps: the next frame's pts drops below _current -> loop-wrap detected.
+    p._frames.put(synth(0.0))
+    p.frame_at(now)
+    assert not p._resuming, "loop-wrap during catch-up must release the hold"
