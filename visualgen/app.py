@@ -63,6 +63,8 @@ def run(show_path: Path, config_path: Path) -> int:
                 commands.put(Command.NEXT)
             elif key == glfw.KEY_LEFT:
                 commands.put(Command.PREVIOUS)
+            elif key == glfw.KEY_DOWN:
+                commands.put(Command.RECALL)
 
         glfw.set_key_callback(win, on_key)
 
@@ -78,7 +80,8 @@ def run(show_path: Path, config_path: Path) -> int:
                     break
                 target = cue_manager.handle(command)
                 if target is not None:
-                    engine.switch_to(target, cue_manager.adjacent(), clock.now())
+                    resume = command is Command.RECALL
+                    engine.switch_to(target, cue_manager.adjacent(), clock.now(), resume=resume)
 
             if cue_manager.state is State.SWITCHING and engine.preloads_ready():
                 cue_manager.complete_switch()
