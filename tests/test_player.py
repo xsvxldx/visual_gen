@@ -170,3 +170,39 @@ def test_start_resume_replays_from_left_position(video_file):
         assert shown.pts == left.pts
     finally:
         p.stop()
+
+
+def test_resume_holds_left_frame_until_decoder_reaches_it(video_file):
+    # Recall must NOT show the fast-forward catch-up frames. The decoder seeks to the
+    # keyframe at/before the resume point and walks forward; while it does, the operator
+    # should keep seeing the exact frame they left on, then playback goes live AT the
+    # resume point. Driven deterministically (frames injected, no decode thread running)
+    # so it does not depend on decode timing.
+    import numpy as np
+
+    def synth(pts):
+        z = np.zeros((2, 2), dtype=np.uint8)
+        return Frame(pts, 2, 2, z, z, z)
+
+    p = VideoPlayer(video_file)
+    p.preload()
+    # Operator left the cue on the frame at pts 0.40.
+    left = synth(0.40)
+    p._hold = left
+    p._resume_pts = 0.40
+    p._resuming = True
+    p._current = None
+    now = 100.0
+    p._epoch = now - 0.40  # as start(resume=True) sets it
+
+    # The decoder has only produced an early catch-up frame so far (0.10, well before 0.40).
+    p._frames.put(synth(0.10))
+    shown = p.frame_at(now)
+    assert shown.pts == 0.40, "must hold the left-on frame, not reveal a catch-up frame"
+    assert p._resuming, "still catching up"
+
+    # The decoder reaches the resume point.
+    p._frames.put(synth(0.40))
+    live = p.frame_at(now)
+    assert live.pts == 0.40, "reveals live playback at the resume point"
+    assert not p._resuming, "catch-up complete -> live"

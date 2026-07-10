@@ -45,6 +45,7 @@ class VideoPlayer:
         self._current: Frame | None = None
         self._resume_pts: float = 0.0
         self._hold: Frame | None = None
+        self._resuming: bool = False
         self.first_frame: Frame | None = None
 
     def preload(self) -> None:
@@ -87,6 +88,7 @@ class VideoPlayer:
         self._current = None
         if not resume:
             self._hold = None
+        self._resuming = resume
         self._error = None
         self._epoch = now - self._resume_pts if resume else now
         self._stop_event.clear()
@@ -150,6 +152,15 @@ class VideoPlayer:
                 self._current = self._frames.get_nowait()
             else:
                 break
+        if self._resuming:
+            if self._current is not None and self._current.pts >= self._resume_pts:
+                self._resuming = False  # decoder reached the resume point -> go live
+            else:
+                # Still decoding forward from the keyframe. Keep the left-on frame
+                # frozen instead of revealing the fast-forward catch-up frames.
+                held = self._hold or self.first_frame
+                assert held is not None, "frame_at() before preload()"
+                return held
         result = self._current or self._hold or self.first_frame
         assert result is not None, "frame_at() before preload()"
         return result
