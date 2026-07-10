@@ -1,6 +1,7 @@
 import moderngl
 import numpy as np
 
+from visualgen.instruction import Blend, RenderInstruction, Single
 from visualgen.player import Frame
 
 _VERTEX = """
@@ -80,6 +81,13 @@ class Renderer:
         vw, vh = int(frame.width * scale), int(frame.height * scale)
         return ((ww - vw) // 2, (wh - vh) // 2, vw, vh)
 
+    def render(self, instruction: RenderInstruction) -> None:
+        """Draw a render instruction. Single draws one frame; Blend mixes two."""
+        if isinstance(instruction, Single):
+            self.draw(instruction.frame)
+        elif isinstance(instruction, Blend):
+            self._draw_blend(instruction)
+
     def draw(self, frame: Frame) -> None:
         self._ensure_textures(frame)
         assert self._textures is not None
@@ -92,6 +100,9 @@ class Renderer:
         for unit, tex in enumerate(self._textures):
             tex.use(location=unit)
         self._vao.render(moderngl.TRIANGLE_STRIP)
+
+    def _draw_blend(self, blend: Blend) -> None:
+        raise NotImplementedError("two-frame blending arrives in the crossfade milestone")
 
     def draw_clear(self, rgb: tuple[float, float, float]) -> None:
         self._ctx.viewport = (0, 0, *self._window_size)

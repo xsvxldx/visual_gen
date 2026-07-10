@@ -3,6 +3,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
+from visualgen.instruction import RenderInstruction, Single
 from visualgen.player import Frame, PlayerError, VideoPlayer
 from visualgen.show import Show
 
@@ -136,6 +137,11 @@ class PlaybackEngine:
                 if not self._on_fallback and self._engage_fallback(now):
                     return self.frame_at(now)
         return self._last_frame
+
+    def instruction_at(self, now: float) -> RenderInstruction | None:
+        """The render seam: what the renderer should draw this frame."""
+        frame = self.frame_at(now)
+        return Single(frame) if frame is not None else None
 
     def stop(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)

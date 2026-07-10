@@ -12,6 +12,8 @@ show:
     source: clips/montecarlo.mp4
   - id: onirofobia
     source: clips/onirofobia.mp4
+  - id: trinch
+    source: clips/reel.mp4
 
 # wrap: false (default) -> NEXT on the last cue and PREVIOUS on the first are ignored.
 # wrap: true            -> switching wraps around the ends.

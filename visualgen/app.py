@@ -86,9 +86,9 @@ def run(show_path: Path, config_path: Path) -> int:
             if cue_manager.state is State.SWITCHING and engine.preloads_ready():
                 cue_manager.complete_switch()
 
-            frame = engine.frame_at(clock.now())
-            if frame is not None:
-                renderer.draw(frame)
+            instruction = engine.instruction_at(clock.now())
+            if instruction is not None:
+                renderer.render(instruction)
             else:
                 renderer.draw_clear((0.0, 0.0, 0.0))
             glfw.swap_buffers(win)

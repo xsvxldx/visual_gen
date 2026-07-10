@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 
 from visualgen.engine import PlaybackEngine
+from visualgen.instruction import Single
 from visualgen.player import Frame, PlayerError
 from visualgen.show import Cue, Show
 
@@ -114,6 +115,37 @@ def test_frame_at_returns_current_frame():
     engine, made = make_engine()
     engine.start(0, set(), now=0.0)
     assert engine.frame_at(0.1) is not None
+    engine.stop()
+
+
+def test_instruction_at_wraps_current_frame_in_single():
+    engine, made = make_engine()
+    engine.start(0, set(), now=0.0)
+    instr = engine.instruction_at(0.1)
+    assert isinstance(instr, Single)
+    assert instr.frame is not None
+    engine.stop()
+
+
+def test_instruction_at_returns_none_when_nothing_to_show():
+    cues = (
+        Cue("bad", Path("/fake/explodes-on-preload.mp4")),
+        Cue("ok", Path("/fake/1.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues), fallback=None)
+    engine.start(0, {1}, now=0.0)  # opening cue fails, no fallback -> nothing to show
+    assert engine.instruction_at(0.1) is None
+    engine.stop()
+
+
+def test_instruction_at_single_engages_fallback_on_failure():
+    engine, made = make_engine()
+    engine.start(0, set(), now=0.0)
+    engine.instruction_at(0.1)
+    made[Path("/fake/0.mp4")].fail_on_frame = True
+    instr = engine.instruction_at(0.2)
+    assert isinstance(instr, Single)
+    assert made[Path("/fake/safe.mp4")].started
     engine.stop()
 
 
