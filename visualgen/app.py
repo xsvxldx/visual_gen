@@ -9,7 +9,7 @@ import moderngl
 
 from visualgen import window
 from visualgen.clock import VsyncClock
-from visualgen.commands import Command
+from visualgen.commands import Command, apply_transition_command
 from visualgen.config import ConfigError, load_config
 from visualgen.cues import CueManager, State
 from visualgen.engine import PlaybackEngine
@@ -66,7 +66,24 @@ def run(show_path: Path, config_path: Path) -> int:
             elif key == glfw.KEY_DOWN:
                 commands.put(Command.RECALL)
 
+        # Transition keys are matched by the character typed, not the physical key, so they
+        # work regardless of keyboard layout (the bracket keys sit in different places, and
+        # need different modifiers, across layouts).
+        _CHAR_COMMANDS = {
+            "t": Command.CYCLE_TRANSITION,
+            "]": Command.DURATION_UP,
+            "}": Command.DURATION_UP,
+            "[": Command.DURATION_DOWN,
+            "{": Command.DURATION_DOWN,
+        }
+
+        def on_char(w, codepoint):
+            command = _CHAR_COMMANDS.get(chr(codepoint).lower())
+            if command is not None:
+                commands.put(command)
+
         glfw.set_key_callback(win, on_key)
+        glfw.set_char_callback(win, on_char)
 
         engine.start(cue_manager.index, cue_manager.adjacent(), clock.now())
 
@@ -78,17 +95,24 @@ def run(show_path: Path, config_path: Path) -> int:
                     command = commands.get_nowait()
                 except queue.Empty:
                     break
+                if apply_transition_command(engine, command):
+                    log.info("transition: %s  duration: %.1fs", engine.mode.value, engine.duration)
+                    continue  # live parameter tweak, not a cue move
                 target = cue_manager.handle(command)
                 if target is not None:
                     resume = command is Command.RECALL
                     engine.switch_to(target, cue_manager.adjacent(), clock.now(), resume=resume)
 
-            if cue_manager.state is State.SWITCHING and engine.preloads_ready():
+            if (
+                cue_manager.state is State.SWITCHING
+                and engine.transition_complete()
+                and engine.preloads_ready()
+            ):
                 cue_manager.complete_switch()
 
-            frame = engine.frame_at(clock.now())
-            if frame is not None:
-                renderer.draw(frame)
+            instruction = engine.instruction_at(clock.now())
+            if instruction is not None:
+                renderer.render(instruction)
             else:
                 renderer.draw_clear((0.0, 0.0, 0.0))
             glfw.swap_buffers(win)

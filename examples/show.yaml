@@ -5,6 +5,15 @@
 # Rules enforced at startup: every source file must exist; every id must be unique.
 # You need at least 2 cues to see switching.
 
+# Transitions between adjacent cues (all optional; omit for an instant hard cut).
+#   transition: cut | dip | crossfade | wipe   (default: cut)
+#   duration:   seconds the blend lasts         (default: 0.8; ignored for cut)
+# Live keys while running (session-only, not written back here):
+#   t     cycle the blend:  cut -> dip -> crossfade -> wipe -> cut
+#   ]  [  lengthen / shorten the duration by 0.1s (floored at 0.1s)
+transition: crossfade
+duration: 0.8
+
 show:
   - id: horse
     source: clips/horse.mp4
@@ -12,6 +21,8 @@ show:
     source: clips/montecarlo.mp4
   - id: onirofobia
     source: clips/onirofobia.mp4
+  - id: trinch
+    source: clips/reel.mp4
 
 # wrap: false (default) -> NEXT on the last cue and PREVIOUS on the first are ignored.
 # wrap: true            -> switching wraps around the ends.

@@ -1,7 +1,10 @@
 import time
 from pathlib import Path
 
+import pytest
+
 from visualgen.engine import PlaybackEngine
+from visualgen.instruction import Blend, Single, TransitionMode
 from visualgen.player import Frame, PlayerError
 from visualgen.show import Cue, Show
 
@@ -25,6 +28,7 @@ class FakePlayer:
         self.double_started = False  # start() called while already running -> would spawn a 2nd decode thread
         self.pause_count = 0
         self.resumed = False  # last value of the resume flag passed to start()
+        self.own_frame = fake_frame()  # stable identity, so blends can be attributed to a player
 
     def preload(self):
         if self.source.name == "explodes-on-preload.mp4":
@@ -47,7 +51,7 @@ class FakePlayer:
     def frame_at(self, now):
         if self.fail_on_frame:
             raise PlayerError("decode died")
-        return fake_frame()
+        return self.own_frame
 
     def stop(self):
         self.running = False
@@ -114,6 +118,168 @@ def test_frame_at_returns_current_frame():
     engine, made = make_engine()
     engine.start(0, set(), now=0.0)
     assert engine.frame_at(0.1) is not None
+    engine.stop()
+
+
+def test_instruction_at_wraps_current_frame_in_single():
+    engine, made = make_engine()
+    engine.start(0, set(), now=0.0)
+    instr = engine.instruction_at(0.1)
+    assert isinstance(instr, Single)
+    assert instr.frame is not None
+    engine.stop()
+
+
+def test_instruction_at_returns_none_when_nothing_to_show():
+    cues = (
+        Cue("bad", Path("/fake/explodes-on-preload.mp4")),
+        Cue("ok", Path("/fake/1.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues), fallback=None)
+    engine.start(0, {1}, now=0.0)  # opening cue fails, no fallback -> nothing to show
+    assert engine.instruction_at(0.1) is None
+    engine.stop()
+
+
+def test_instruction_at_single_engages_fallback_on_failure():
+    engine, made = make_engine()
+    engine.start(0, set(), now=0.0)
+    engine.instruction_at(0.1)
+    made[Path("/fake/0.mp4")].fail_on_frame = True
+    instr = engine.instruction_at(0.2)
+    assert isinstance(instr, Single)
+    assert made[Path("/fake/safe.mp4")].started
+    engine.stop()
+
+
+def test_engine_seeds_mode_and_duration_from_show():
+    show = Show(make_show().cues, transition=TransitionMode.CROSSFADE, duration=1.2)
+    engine, made = make_engine(show=show)
+    assert engine.mode is TransitionMode.CROSSFADE
+    assert engine.duration == 1.2
+    engine.stop()
+
+
+def test_cycle_mode_advances_and_wraps():
+    engine, made = make_engine()  # default show -> CUT
+    assert engine.mode is TransitionMode.CUT
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.DIP
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.CROSSFADE
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.WIPE
+    engine.cycle_mode()
+    assert engine.mode is TransitionMode.CUT
+    engine.stop()
+
+
+def test_adjust_duration_steps_and_floors_at_min():
+    show = Show(make_show().cues, duration=0.5)
+    engine, made = make_engine(show=show)
+    engine.adjust_duration(0.1)
+    assert engine.duration == pytest.approx(0.6)
+    engine.adjust_duration(-1.0)
+    assert engine.duration == pytest.approx(0.1)  # floored, never <= 0
+    engine.stop()
+
+
+def _crossfade_engine(duration=1.0):
+    show = Show(make_show().cues, transition=TransitionMode.CROSSFADE, duration=duration)
+    engine, made = make_engine(show=show)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    return engine, made
+
+
+def test_crossfade_blends_both_players_during_window():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    instr = engine.instruction_at(1.5)  # halfway through the 1.0s window
+    assert isinstance(instr, Blend)
+    assert instr.mode is TransitionMode.CROSSFADE
+    assert instr.from_frame is made[Path("/fake/0.mp4")].own_frame
+    assert instr.to_frame is made[Path("/fake/1.mp4")].own_frame
+    assert instr.t == pytest.approx(0.5)
+    engine.stop()
+
+
+def test_transition_t_is_clamped_to_unit_interval():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    instr = engine.instruction_at(1.25)
+    assert 0.0 <= instr.t <= 1.0
+    assert instr.t == pytest.approx(0.25)
+    engine.stop()
+
+
+def test_outgoing_decodes_during_window_and_pauses_at_finalize():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.5)  # mid-window: both decode
+    assert made[Path("/fake/0.mp4")].pause_count == 0
+    engine.instruction_at(2.0)  # t reaches 1 -> finalize
+    assert made[Path("/fake/0.mp4")].pause_count == 1
+    engine.stop()
+
+
+def test_transition_finalizes_to_single_after_duration():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert not engine.transition_complete()
+    instr = engine.instruction_at(2.5)  # past the end
+    assert isinstance(instr, Single)
+    assert instr.frame is made[Path("/fake/1.mp4")].own_frame  # finalize to the incoming, at its now-position
+    assert engine.transition_complete()
+    engine.stop()
+
+
+def test_dip_and_wipe_modes_are_carried_on_the_blend():
+    for mode in (TransitionMode.DIP, TransitionMode.WIPE):
+        show = Show(make_show().cues, transition=mode, duration=1.0)
+        engine, made = make_engine(show=show)
+        engine.start(0, {1}, now=0.0)
+        assert wait_ready(engine)
+        engine.switch_to(1, {0, 2}, now=1.0)
+        instr = engine.instruction_at(1.5)
+        assert isinstance(instr, Blend)
+        assert instr.mode is mode
+        engine.stop()
+
+
+def test_incoming_failure_mid_transition_aborts_to_fallback():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.3)  # blend underway
+    made[Path("/fake/1.mp4")].fail_on_frame = True  # the incoming cue dies
+    instr = engine.instruction_at(1.5)
+    assert isinstance(instr, Single), "no partial blend may survive a failure"
+    assert made[Path("/fake/safe.mp4")].started, "incoming death engages the fallback"
+    assert engine.transition_complete(), "must not stay stuck in a transition"
+    engine.stop()
+
+
+def test_outgoing_failure_mid_transition_finalizes_to_incoming():
+    engine, made = _crossfade_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.3)  # blend underway
+    made[Path("/fake/0.mp4")].fail_on_frame = True  # the outgoing cue dies
+    instr = engine.instruction_at(1.5)
+    assert isinstance(instr, Single)
+    assert instr.frame is made[Path("/fake/1.mp4")].own_frame, "hard-cut to the healthy destination"
+    assert not made[Path("/fake/safe.mp4")].started, "destination healthy -> no fallback"
+    assert engine.transition_complete()
+    engine.stop()
+
+
+def test_cut_mode_completes_immediately_without_a_blend():
+    engine, made = make_engine()  # default show -> CUT
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert engine.transition_complete()  # no window for a cut
+    assert isinstance(engine.instruction_at(1.0), Single)
+    assert made[Path("/fake/0.mp4")].pause_count == 1  # outgoing paused instantly, as before
     engine.stop()
 
 

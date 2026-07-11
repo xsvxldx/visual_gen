@@ -1,5 +1,6 @@
 import pytest
 
+from visualgen.instruction import TransitionMode
 from visualgen.show import Show, ShowError, load_show
 
 
@@ -30,6 +31,49 @@ def test_wrap_flag(tmp_path):
     make_video(tmp_path, "a.mp4")
     p = write_show(tmp_path, "wrap: true\nshow:\n  - {id: a, source: a.mp4}\n")
     assert load_show(p).wrap is True
+
+
+def test_transition_defaults_when_absent(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "show:\n  - {id: a, source: a.mp4}\n")
+    show = load_show(p)
+    assert show.transition is TransitionMode.CUT
+    assert show.duration == 0.8
+
+
+def test_transition_and_duration_parsed(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "transition: crossfade\nduration: 1.5\nshow:\n  - {id: a, source: a.mp4}\n")
+    show = load_show(p)
+    assert show.transition is TransitionMode.CROSSFADE
+    assert show.duration == 1.5
+
+
+def test_transition_is_case_insensitive(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "transition: Wipe\nshow:\n  - {id: a, source: a.mp4}\n")
+    assert load_show(p).transition is TransitionMode.WIPE
+
+
+def test_unknown_transition_raises(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "transition: swirl\nshow:\n  - {id: a, source: a.mp4}\n")
+    with pytest.raises(ShowError, match="transition"):
+        load_show(p)
+
+
+def test_non_positive_duration_raises(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "duration: 0\nshow:\n  - {id: a, source: a.mp4}\n")
+    with pytest.raises(ShowError, match="duration"):
+        load_show(p)
+
+
+def test_non_numeric_duration_raises(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "duration: soon\nshow:\n  - {id: a, source: a.mp4}\n")
+    with pytest.raises(ShowError, match="duration"):
+        load_show(p)
 
 
 def test_missing_file_raises(tmp_path):
