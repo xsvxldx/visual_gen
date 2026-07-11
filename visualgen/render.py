@@ -35,9 +35,11 @@ void main() {
 }
 """
 
-# Two-frame blend. Mirrors the YUV->RGB of _FRAGMENT for each of two frames,
-# then mixes per mode: dip=1 (through black), crossfade=2 (dissolve), wipe=3
-# (moving left-to-right edge). cut never reaches here (the engine emits a Single).
+# Two-frame blend. uv spans the whole window; each frame is letterboxed independently
+# into its own centered rect (from_rect / to_rect, in window uv), so a frame keeps its own
+# aspect throughout the transition — never squished into the other's shape. Outside a frame's
+# rect it reads black (the letterbox bars). Then the two are mixed per mode: dip=1 (through
+# black), crossfade=2 (dissolve), wipe=3 (moving left-to-right edge). cut never reaches here.
 _BLEND_FRAGMENT = """
 #version 330
 uniform sampler2D from_y;
@@ -48,21 +50,30 @@ uniform sampler2D to_u;
 uniform sampler2D to_v;
 uniform float u_t;
 uniform int u_mode;
+uniform vec4 from_rect;  // x, y, w, h in window uv (0..1)
+uniform vec4 to_rect;
 in vec2 uv;
 out vec4 fragColor;
-vec3 yuv2rgb(sampler2D ty, sampler2D tu, sampler2D tv) {
-    float y = 1.1643 * (texture(ty, uv).r - 0.0625);
-    float u = texture(tu, uv).r - 0.5;
-    float v = texture(tv, uv).r - 0.5;
+vec3 yuv2rgb(sampler2D ty, sampler2D tu, sampler2D tv, vec2 st) {
+    float y = 1.1643 * (texture(ty, st).r - 0.0625);
+    float u = texture(tu, st).r - 0.5;
+    float v = texture(tv, st).r - 0.5;
     return vec3(
         y + 1.5958 * v,
         y - 0.39173 * u - 0.81290 * v,
         y + 2.017 * u
     );
 }
+vec3 sample_boxed(sampler2D ty, sampler2D tu, sampler2D tv, vec4 rect) {
+    vec2 st = (uv - rect.xy) / rect.zw;
+    if (st.x < 0.0 || st.x > 1.0 || st.y < 0.0 || st.y > 1.0) {
+        return vec3(0.0);  // outside this frame's rect -> letterbox bar
+    }
+    return yuv2rgb(ty, tu, tv, st);
+}
 void main() {
-    vec3 a = yuv2rgb(from_y, from_u, from_v);
-    vec3 b = yuv2rgb(to_y, to_u, to_v);
+    vec3 a = sample_boxed(from_y, from_u, from_v, from_rect);
+    vec3 b = sample_boxed(to_y, to_u, to_v, to_rect);
     vec3 rgb;
     if (u_mode == 1) {
         // dip through black: a fades out over the first half, b fades up over the second
@@ -143,6 +154,13 @@ class Renderer:
         vw, vh = int(frame.width * scale), int(frame.height * scale)
         return ((ww - vw) // 2, (wh - vh) // 2, vw, vh)
 
+    def _letterbox_rect(self, frame: Frame) -> tuple[float, float, float, float]:
+        # The frame's centered letterbox as a rect in window uv (0..1), for the blend shader.
+        ww, wh = self._window_size
+        scale = min(ww / frame.width, wh / frame.height)
+        vw, vh = frame.width * scale, frame.height * scale
+        return ((ww - vw) / 2 / ww, (wh - vh) / 2 / wh, vw / ww, vh / wh)
+
     def render(self, instruction: RenderInstruction) -> None:
         """Draw a render instruction. Single draws one frame; Blend mixes two."""
         if isinstance(instruction, Single):
@@ -162,19 +180,16 @@ class Renderer:
         self._vao.render(moderngl.TRIANGLE_STRIP)
 
     def _draw_blend(self, blend: Blend) -> None:
-        # v1 assumes adjacent cues share resolution (authoring expectation, as with the later
-        # morph contract). If they differ, the "from" frame is sampled by normalized UV over the
-        # incoming frame's letterbox quad -> stretched, never a crash.
+        # Each frame is letterboxed independently in the shader (from_rect / to_rect), so both
+        # keep their own aspect for the whole transition regardless of differing resolutions.
         self._upload(0, blend.from_frame)
         self._upload(1, blend.to_frame)
         self._blend_program["u_t"].value = blend.t
-        # u_mode is unused until dip/wipe land, so GLSL may strip it; set it only if live.
-        mode_uniform = self._blend_program.get("u_mode", None)
-        if mode_uniform is not None:
-            mode_uniform.value = _MODE_INT.get(blend.mode, 2)
-        self._ctx.viewport = (0, 0, *self._window_size)
+        self._blend_program["from_rect"].value = self._letterbox_rect(blend.from_frame)
+        self._blend_program["to_rect"].value = self._letterbox_rect(blend.to_frame)
+        self._blend_program["u_mode"].value = _MODE_INT.get(blend.mode, 2)
+        self._ctx.viewport = (0, 0, *self._window_size)  # full window; shader draws the bars black
         self._ctx.clear(0.0, 0.0, 0.0)
-        self._ctx.viewport = self._letterbox_viewport(blend.to_frame)
         for unit, tex in enumerate((*self._textures[0], *self._textures[1])):
             tex.use(location=unit)
         self._blend_vao.render(moderngl.TRIANGLE_STRIP)
