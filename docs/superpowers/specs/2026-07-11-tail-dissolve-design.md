@@ -2,7 +2,9 @@
 
 **Status:** Approved. A new transition type, built on the merged transitions framework
 (`docs/superpowers/specs/2026-07-10-transitions-framework-design.md`).
-**Date:** 2026-07-11
+**Date:** 2026-07-11 — amended same day after code review: recall/resume carried through the
+tail, "tail is possible" defined precisely (explicit cut otherwise), exception-safe last-frame
+capture, finalize catches `PlayerError` internally.
 
 **Ground rule:** reliability over cleverness — this runs live performances. The switch must never
 stall waiting to decode, and must always resolve to a clean single source.
@@ -43,16 +45,21 @@ No new keys, no new config fields. It reuses the framework's mode/duration sessi
 
 ## How A-last is obtained
 
-Extend `VideoPlayer` with a `last_frame: Frame | None` attribute, captured **eagerly at preload**
-on the background preload thread (never on the main loop):
+Extend `VideoPlayer` with a `last_frame: Frame | None` attribute, captured **eagerly inside
+`preload()`**. Preload usually runs on the background preload pool, so the capture usually does
+too — but `preload()` is also called synchronously on the main loop (initial `engine.start()`,
+`switch_to`'s lazy-load path, the fallback player), so the capture adds a small one-time cost
+there as well. Accepted for v1; it is bounded (one seek + one short decode).
 
 - During `preload()`, after the existing first-frame capture, obtain the clip's final frame:
   open the source, seek to the end (by stream duration), decode forward through the last GOP, and
   keep the last decoded frame — converted via the existing `_convert` helper. Do this in an
   **isolated short-lived container** so it cannot disturb the playback container's state (which
   `start()` re-seeks anyway).
-- If the stream has no usable duration, or seek-to-end / decode yields nothing, leave
-  `last_frame = None` (→ fallback, below). Never decode a whole unknown-length file to find it.
+- The capture is **exception-safe**: wrap the whole end-capture in a try/except and swallow
+  every failure into `last_frame = None` (→ fallback, below). A failed capture must never turn
+  a playable clip into a failed preload. Likewise if the stream has no usable duration, or
+  seek-to-end / decode yields nothing. Never decode a whole unknown-length file to find it.
 
 Because preload runs for the current + adjacent cues before you switch, the outgoing cue's
 `last_frame` is ready the instant you press switch — no stall.
@@ -67,20 +74,43 @@ for the resident cues. Noted, not built now.
 ## Engine orchestration
 
 `tail_dissolve` extends the existing in-flight `_Transition` rather than adding a parallel
-mechanism. Add one optional field:
+mechanism. Add two optional fields:
 
 ```
-_Transition(from_index, to_index, start, duration, mode, tail_frame: Frame | None = None)
+_Transition(from_index, to_index, start, duration, mode,
+            tail_frame: Frame | None = None, resume: bool = False)
 ```
 
 `tail_frame` set ⇒ this is a tail_dissolve. `to_index` is still B (the real destination).
+`resume` carries `switch_to`'s resume flag to the deferred start of B (cue recall, below).
 
-**`switch_to(B, …, now)` — tail branch** (when `self._mode is TAIL_DISSOLVE` and the tail is
-possible — see fallback): unlike a base switch, it does **not** start B and does **not** pause A:
+**"The tail is possible" — precise definition.** All of:
+- the outgoing player exists in `_players` (A wasn't evicted/failed),
+- `from_player.last_frame is not None`,
+- the engine is **not** on the fallback video (`_on_fallback` — nothing healthy to dissolve from),
+- `duration > 0`.
+
+When the mode is `TAIL_DISSOLVE` but the tail is **not** possible, take the **explicit cut
+path** (no transition recorded, outgoing paused, B started immediately — today's CUT branch).
+Do **not** fall through to `_should_blend`: it only excludes CUT, so it would approve a blend
+with the new mode, and the renderer silently draws unknown modes as a crossfade
+(`_MODE_INT.get(mode, 2)`) — a two-live-decoder crossfade that violates the one-decoder rule.
+
+**`switch_to(B, …, now, resume)` — tail branch** (when `self._mode is TAIL_DISSOLVE` and the
+tail is possible): unlike a base switch, it does **not** start B and does **not** pause A:
 - Keep A (the outgoing player) decoding.
-- Ensure B's player is loaded (lazy-preload if missing) but **not started**.
-- Record `_Transition(from=A, to=B, start=now, duration, mode=CROSSFADE, tail_frame=A.last_frame)`.
+- Ensure B's player is loaded (lazy-preload if missing) but **not started**. If that load fails,
+  engage the fallback ladder and do not record a tail (the fallback ⇒ no-transition invariant
+  from the framework holds).
+- Record `_Transition(from=A, to=B, start=now, duration, mode=CROSSFADE,
+  tail_frame=A.last_frame, resume=resume)`.
 - Evict far players / request preloads as usual (A and B are both kept — A is adjacent to B).
+
+**Cue recall interaction.** `RECALL` (`DOWN`) switches with `resume=True` so the recalled cue
+picks up at the position the operator left it. Because a tail switch defers B's start to the
+finalize, the flag must ride along on `_Transition`; finalize starts B with
+`start(now, resume=t.resume)`. A recall under tail_dissolve therefore dissolves A into its
+last-frame still, then cuts to B **at its left-on position** — recall semantics are preserved.
 
 **`instruction_at` / `_blend_at` — tail path:** while `t < 1`, emit
 `Blend(from = A.frame_at(now) [live], to = tail_frame [A-last still], t, crossfade)`. B is never
@@ -88,9 +118,12 @@ queried and never decodes. The blend renders as an ordinary crossfade (no render
 renderer already letterboxes each frame by its own aspect, and A-last is A's own resolution).
 
 **Finalize (t ≥ 1) — tail path:** hard cut to B. `_finalize_transition(now)` gains a `now`
-argument; for a tail transition it **starts B** (`to_player.start(now)` — B begins fresh at the
-cut) and **pauses A**. `_current` is already B. If B's player is missing it is lazily created;
-if B fails to load or start, engage the existing fallback ladder. (Base-blend finalize is
+argument; for a tail transition it **starts B** (`to_player.start(now, resume=t.resume)` —
+fresh from the top on a normal switch, at the left-on position on a recall) and **pauses A**.
+`_current` is already B. If B's player is missing it is lazily created; if B fails to load or
+start, engage the existing fallback ladder. Today's finalize cannot fail; this one can —
+**catch `PlayerError` inside `_finalize_transition` itself** (it is called from four places in
+`_blend_at`, and an escaped exception there lands in the render loop). (Base-blend finalize is
 unchanged except for threading `now`: it still just pauses the outgoing player.)
 
 Result: exactly one decoder throughout, a clean crossfade-into-still, then a crisp cut to a
@@ -123,8 +156,13 @@ Unit tests mirror the framework's `FakePlayer` + float-`now` style. `FakePlayer`
 - **Engine (tail path):** during the window emits `Blend(live-A, A-last-still, crossfade)` with
   the still as the `to` frame; **B is not started during the window**; at `t ≥ 1` B is started
   and A is paused (`pause_count`); `transition_complete()` flips true.
-- **Fallback:** `last_frame is None` ⇒ no tail, hard-cut to B (B started immediately, no blend);
-  A dies mid-dissolve ⇒ finalize/cut to B; B start-failure at the cut ⇒ fallback engaged.
+- **Cue recall under tail:** a `switch_to(…, resume=True)` records `resume` on the transition
+  and B is started with `resume=True` **at the finalize** (assert `FakePlayer.resumed`); a
+  normal tail switch finalizes with `resume=False`.
+- **Fallback / tail not possible:** `last_frame is None` ⇒ no tail, hard-cut to B (B started
+  immediately, no blend recorded); same explicit-cut behaviour when the engine is on the
+  fallback video or the outgoing player is missing; A dies mid-dissolve ⇒ finalize/cut to B;
+  B start-failure at the cut ⇒ fallback engaged, no exception escapes `instruction_at`.
 - **last_frame capture (real clip):** a `VideoPlayer` preloaded on a short generated/real clip
   exposes a `last_frame` equal to the clip's final frame (test in `test_player.py` style;
   reuse the `video_file` fixture or a synthesized multi-frame clip).
