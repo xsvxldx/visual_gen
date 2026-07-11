@@ -65,14 +65,25 @@ def run(show_path: Path, config_path: Path) -> int:
                 commands.put(Command.PREVIOUS)
             elif key == glfw.KEY_DOWN:
                 commands.put(Command.RECALL)
-            elif key == glfw.KEY_T:
-                commands.put(Command.CYCLE_TRANSITION)
-            elif key == glfw.KEY_RIGHT_BRACKET:
-                commands.put(Command.DURATION_UP)
-            elif key == glfw.KEY_LEFT_BRACKET:
-                commands.put(Command.DURATION_DOWN)
+
+        # Transition keys are matched by the character typed, not the physical key, so they
+        # work regardless of keyboard layout (the bracket keys sit in different places, and
+        # need different modifiers, across layouts).
+        _CHAR_COMMANDS = {
+            "t": Command.CYCLE_TRANSITION,
+            "]": Command.DURATION_UP,
+            "}": Command.DURATION_UP,
+            "[": Command.DURATION_DOWN,
+            "{": Command.DURATION_DOWN,
+        }
+
+        def on_char(w, codepoint):
+            command = _CHAR_COMMANDS.get(chr(codepoint).lower())
+            if command is not None:
+                commands.put(command)
 
         glfw.set_key_callback(win, on_key)
+        glfw.set_char_callback(win, on_char)
 
         engine.start(cue_manager.index, cue_manager.adjacent(), clock.now())
 
@@ -85,6 +96,7 @@ def run(show_path: Path, config_path: Path) -> int:
                 except queue.Empty:
                     break
                 if apply_transition_command(engine, command):
+                    log.info("transition: %s  duration: %.1fs", engine.mode.value, engine.duration)
                     continue  # live parameter tweak, not a cue move
                 target = cue_manager.handle(command)
                 if target is not None:
