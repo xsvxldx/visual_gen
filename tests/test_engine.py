@@ -170,7 +170,24 @@ def test_cycle_mode_advances_and_wraps():
     engine.cycle_mode()
     assert engine.mode is TransitionMode.WIPE
     engine.cycle_mode()
+    assert engine.mode is TransitionMode.TAIL_DISSOLVE
+    engine.cycle_mode()
     assert engine.mode is TransitionMode.CUT
+    engine.stop()
+
+
+def test_tail_dissolve_mode_switches_as_a_cut_when_no_tail_is_possible():
+    # TAIL_DISSOLVE must NEVER fall through to the two-live-player base-blend path:
+    # the renderer silently draws unknown modes as a crossfade, which would break
+    # the one-decoder rule. Anything short of a possible tail is a plain cut.
+    show = Show(make_show().cues, transition=TransitionMode.TAIL_DISSOLVE, duration=1.0)
+    engine, made = make_engine(show=show)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert engine.transition_complete(), "no blend window may be recorded"
+    assert isinstance(engine.instruction_at(1.0), Single)
+    assert made[Path("/fake/0.mp4")].pause_count == 1  # outgoing paused instantly, like a cut
     engine.stop()
 
 

@@ -62,7 +62,7 @@ class PlaybackEngine:
         return self._duration
 
     def cycle_mode(self) -> None:
-        """Advance the base blend: cut -> dip -> crossfade -> wipe -> cut. Session-only."""
+        """Advance the mode: cut -> dip -> crossfade -> wipe -> tail_dissolve -> cut. Session-only."""
         modes = list(TransitionMode)
         self._mode = modes[(modes.index(self._mode) + 1) % len(modes)]
 
@@ -121,7 +121,9 @@ class PlaybackEngine:
 
     def _should_blend(self, from_player: VideoPlayer | None, to_player: VideoPlayer | None) -> bool:
         return (
-            self._mode is not TransitionMode.CUT
+            # TAIL_DISSOLVE has its own switch path; here it must degrade to a cut,
+            # never to a two-live-player base blend.
+            self._mode not in (TransitionMode.CUT, TransitionMode.TAIL_DISSOLVE)
             and self._duration > 0
             and from_player is not None
             and to_player is not None
