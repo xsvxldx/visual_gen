@@ -243,7 +243,14 @@ class PlaybackEngine:
         if t.tail_frame is not None:
             # Tail dissolve: live A fades into its own last-frame still. B is never
             # queried and never decodes during the window.
-            from_frame = from_player.frame_at(now)
+            try:
+                from_frame = from_player.frame_at(now)
+            except PlayerError as exc:
+                # The outgoing cue died mid-dissolve: finalize immediately -- for a
+                # tail, the finalize IS the hard cut to the healthy destination.
+                log.error("outgoing cue '%s' failed mid-dissolve: %s", self._show.cues[t.from_index].id, exc)
+                self._finalize_transition(now)
+                return None
             self._last_frame = t.tail_frame
             return Blend(from_frame, t.tail_frame, max(0.0, min(1.0, progress)), t.mode)
         try:
@@ -274,6 +281,8 @@ class PlaybackEngine:
         Base blend: the destination is already running -- just pause the outgoing
         player. Tail dissolve: the destination was never started, so this IS the
         hard cut -- start it here (fresh, or at its left-on position on a recall).
+        start() can raise and this runs inside the render loop, so failures drop
+        to the fallback ladder instead of escaping.
         """
         t = self._transition
         self._transition = None
@@ -281,8 +290,14 @@ class PlaybackEngine:
             return
         if t.tail_frame is not None:
             to_player = self._players.get(t.to_index)
-            if to_player is not None:
+            try:
+                if to_player is None:
+                    raise PlayerError(f"player for cue '{self._show.cues[t.to_index].id}' missing at the cut")
                 to_player.start(now, resume=t.resume)
+            except PlayerError as exc:
+                log.error("cue '%s' failed to start at the cut: %s", self._show.cues[t.to_index].id, exc)
+                self._failed.add(t.to_index)
+                self._engage_fallback(now)
         from_player = self._players.get(t.from_index)
         if from_player is not None:
             from_player.pause()

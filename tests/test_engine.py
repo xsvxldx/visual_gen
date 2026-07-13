@@ -504,3 +504,55 @@ def test_tail_recall_starts_incoming_at_its_left_on_position():
     assert p0.resumed is True, "recall must resume at the left-on position"
     assert engine.transition_complete()
     engine.stop()
+
+
+def test_tail_without_last_frame_hard_cuts():
+    # Odd/short/corrupt clip: the capture yielded no still -> plain cut, no window.
+    engine, made = _tail_engine(duration=1.0)
+    made[Path("/fake/0.mp4")].last_frame = None
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert engine.transition_complete()
+    assert made[Path("/fake/1.mp4")].started, "cut: B starts immediately"
+    assert made[Path("/fake/0.mp4")].pause_count == 1
+    assert isinstance(engine.instruction_at(1.0), Single)
+    engine.stop()
+
+
+def test_tail_from_fallback_hard_cuts():
+    # A died earlier and the fallback video owns the screen: nothing healthy to
+    # dissolve from -> the switch must be a plain cut, not a tail.
+    engine, made = _tail_engine(duration=1.0)
+    made[Path("/fake/0.mp4")].fail_on_frame = True
+    engine.instruction_at(0.5)  # engages the fallback
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert engine.transition_complete()
+    assert made[Path("/fake/1.mp4")].started
+    assert isinstance(engine.instruction_at(1.1), Single)
+    engine.stop()
+
+
+def test_tail_outgoing_death_mid_dissolve_cuts_to_incoming():
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.3)  # dissolve underway
+    made[Path("/fake/0.mp4")].fail_on_frame = True  # the outgoing cue dies
+    instr = engine.instruction_at(1.5)
+    assert isinstance(instr, Single), "no partial blend may survive a failure"
+    assert instr.frame is made[Path("/fake/1.mp4")].own_frame, "hard-cut to the healthy destination"
+    assert made[Path("/fake/1.mp4")].started, "the death cut must start B"
+    assert not made[Path("/fake/safe.mp4")].started, "destination healthy -> no fallback"
+    assert engine.transition_complete()
+    engine.stop()
+
+
+def test_tail_incoming_start_failure_at_the_cut_engages_fallback():
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.5)  # dissolve underway
+    made[Path("/fake/1.mp4")].fail_on_start = True  # B will fail at the cut
+    instr = engine.instruction_at(2.0)  # must not raise into the render loop
+    assert instr is not None
+    assert made[Path("/fake/safe.mp4")].started, "start failure at the cut -> fallback ladder"
+    assert made[Path("/fake/0.mp4")].pause_count == 1, "A is still paused: single-decoder rule holds"
+    assert engine.transition_complete(), "must not stay stuck in a transition"
+    engine.stop()
