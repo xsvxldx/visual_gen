@@ -47,6 +47,7 @@ class VideoPlayer:
         self._hold: Frame | None = None
         self._resuming: bool = False
         self.first_frame: Frame | None = None
+        self.last_frame: Frame | None = None
 
     def preload(self) -> None:
         try:
@@ -61,6 +62,31 @@ class VideoPlayer:
             raise PlayerError(f"{self._source}: {exc}") from exc
         self.first_frame = _convert(first, self._time_base)
         self._frames.put(self.first_frame)
+        self.last_frame = self._capture_last_frame()
+
+    def _capture_last_frame(self) -> Frame | None:
+        """The clip's final frame, decoded in an isolated short-lived container.
+
+        Never raises: any failure (no duration, bad seek, nothing decodable)
+        yields None and the tail dissolve is treated as unavailable. Uses its
+        own container so the playback container's decode state is untouched,
+        and never scans a whole file -- one seek, then forward through the
+        last keyframe group only.
+        """
+        try:
+            with av.open(self._source) as container:
+                stream = container.streams.video[0]
+                if stream.duration is None:
+                    return None
+                container.seek(stream.duration, stream=stream)
+                last = None
+                for frame in container.decode(stream):
+                    last = frame
+                if last is None:
+                    return None
+                return _convert(last, stream.time_base)
+        except Exception:
+            return None
 
     def start(self, now: float, resume: bool = False) -> None:
         """Begin (or restart) continuous decoding.
