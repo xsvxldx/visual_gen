@@ -29,6 +29,7 @@ class FakePlayer:
         self.pause_count = 0
         self.resumed = False  # last value of the resume flag passed to start()
         self.own_frame = fake_frame()  # stable identity, so blends can be attributed to a player
+        self.last_frame = fake_frame()  # distinct still, so tail blends can be attributed to it
 
     def preload(self):
         if self.source.name == "explodes-on-preload.mp4":
@@ -170,7 +171,25 @@ def test_cycle_mode_advances_and_wraps():
     engine.cycle_mode()
     assert engine.mode is TransitionMode.WIPE
     engine.cycle_mode()
+    assert engine.mode is TransitionMode.TAIL_DISSOLVE
+    engine.cycle_mode()
     assert engine.mode is TransitionMode.CUT
+    engine.stop()
+
+
+def test_tail_dissolve_mode_switches_as_a_cut_when_no_tail_is_possible():
+    # TAIL_DISSOLVE must NEVER fall through to the two-live-player base-blend path:
+    # the renderer silently draws unknown modes as a crossfade, which would break
+    # the one-decoder rule. Anything short of a possible tail is a plain cut.
+    show = Show(make_show().cues, transition=TransitionMode.TAIL_DISSOLVE, duration=1.0)
+    engine, made = make_engine(show=show)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    made[Path("/fake/0.mp4")].last_frame = None  # force the not-possible branch
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert engine.transition_complete(), "no blend window may be recorded"
+    assert isinstance(engine.instruction_at(1.0), Single)
+    assert made[Path("/fake/0.mp4")].pause_count == 1  # outgoing paused instantly, like a cut
     engine.stop()
 
 
@@ -422,4 +441,118 @@ def test_switch_to_resume_passes_resume_flag_to_target():
     assert wait_ready(engine)
     engine.switch_to(0, {1, 2}, now=2.0, resume=True)  # recall: resume cue 0
     assert made[Path("/fake/0.mp4")].resumed is True
+    engine.stop()
+
+
+def _tail_engine(duration=1.0):
+    show = Show(make_show().cues, transition=TransitionMode.TAIL_DISSOLVE, duration=duration)
+    engine, made = make_engine(show=show)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    return engine, made
+
+
+def test_tail_blends_live_outgoing_into_its_own_last_frame_still():
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    instr = engine.instruction_at(1.5)  # halfway through the 1.0s window
+    assert isinstance(instr, Blend)
+    assert instr.mode is TransitionMode.CROSSFADE  # renders as an ordinary crossfade
+    assert instr.from_frame is made[Path("/fake/0.mp4")].own_frame  # live A
+    assert instr.to_frame is made[Path("/fake/0.mp4")].last_frame  # A's still -- NOT B
+    assert instr.t == pytest.approx(0.5)
+    engine.stop()
+
+
+def test_tail_never_starts_incoming_during_the_window():
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.5)
+    assert not made[Path("/fake/1.mp4")].started, "one decoder: B must not run during the dissolve"
+    assert made[Path("/fake/0.mp4")].running, "A keeps decoding during the dissolve"
+    assert made[Path("/fake/0.mp4")].pause_count == 0
+    engine.stop()
+
+
+def test_tail_finalize_cuts_to_incoming_and_pauses_outgoing():
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.5)
+    assert not engine.transition_complete()
+    instr = engine.instruction_at(2.0)  # t reaches 1 -> the hard cut
+    assert isinstance(instr, Single), "past the window: a clean single source"
+    assert instr.frame is made[Path("/fake/1.mp4")].own_frame
+    assert made[Path("/fake/1.mp4")].started, "the cut starts B"
+    assert made[Path("/fake/1.mp4")].resumed is False, "normal switch: B starts fresh from the top"
+    assert made[Path("/fake/0.mp4")].pause_count == 1, "the cut pauses A"
+    assert engine.transition_complete()
+    engine.stop()
+
+
+def test_tail_recall_starts_incoming_at_its_left_on_position():
+    # Cue recall (DOWN) switches with resume=True. A tail switch defers B's start
+    # to the cut, so the flag must ride the transition -- otherwise recall would
+    # silently restart the recalled cue from the top.
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(2.5)  # finish the first dissolve (cut to cue 1)
+    engine.switch_to(0, {1}, now=3.0, resume=True)  # recall the just-left cue
+    p0 = made[Path("/fake/0.mp4")]
+    engine.instruction_at(3.5)  # mid-dissolve: cue 0 must not be restarted yet
+    assert p0.resumed is False
+    engine.instruction_at(4.0)  # the cut
+    assert p0.resumed is True, "recall must resume at the left-on position"
+    assert engine.transition_complete()
+    engine.stop()
+
+
+def test_tail_without_last_frame_hard_cuts():
+    # Odd/short/corrupt clip: the capture yielded no still -> plain cut, no window.
+    engine, made = _tail_engine(duration=1.0)
+    made[Path("/fake/0.mp4")].last_frame = None
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert engine.transition_complete()
+    assert made[Path("/fake/1.mp4")].started, "cut: B starts immediately"
+    assert made[Path("/fake/0.mp4")].pause_count == 1
+    assert isinstance(engine.instruction_at(1.0), Single)
+    engine.stop()
+
+
+def test_tail_from_fallback_hard_cuts():
+    # A died earlier and the fallback video owns the screen: nothing healthy to
+    # dissolve from -> the switch must be a plain cut, not a tail.
+    engine, made = _tail_engine(duration=1.0)
+    made[Path("/fake/0.mp4")].fail_on_frame = True
+    engine.instruction_at(0.5)  # engages the fallback
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert engine.transition_complete()
+    assert made[Path("/fake/1.mp4")].started
+    assert isinstance(engine.instruction_at(1.1), Single)
+    engine.stop()
+
+
+def test_tail_outgoing_death_mid_dissolve_cuts_to_incoming():
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.3)  # dissolve underway
+    made[Path("/fake/0.mp4")].fail_on_frame = True  # the outgoing cue dies
+    instr = engine.instruction_at(1.5)
+    assert isinstance(instr, Single), "no partial blend may survive a failure"
+    assert instr.frame is made[Path("/fake/1.mp4")].own_frame, "hard-cut to the healthy destination"
+    assert made[Path("/fake/1.mp4")].started, "the death cut must start B"
+    assert not made[Path("/fake/safe.mp4")].started, "destination healthy -> no fallback"
+    assert engine.transition_complete()
+    engine.stop()
+
+
+def test_tail_incoming_start_failure_at_the_cut_engages_fallback():
+    engine, made = _tail_engine(duration=1.0)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    engine.instruction_at(1.5)  # dissolve underway
+    made[Path("/fake/1.mp4")].fail_on_start = True  # B will fail at the cut
+    instr = engine.instruction_at(2.0)  # must not raise into the render loop
+    assert instr is not None
+    assert made[Path("/fake/safe.mp4")].started, "start failure at the cut -> fallback ladder"
+    assert made[Path("/fake/0.mp4")].pause_count == 1, "A is still paused: single-decoder rule holds"
+    assert engine.transition_complete(), "must not stay stuck in a transition"
     engine.stop()

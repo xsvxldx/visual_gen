@@ -5,12 +5,14 @@ from visualgen.player import Frame
 
 
 class TransitionMode(Enum):
-    """The selectable base-blend set. CUT never produces a Blend (see engine)."""
+    """The selectable transition set. CUT never produces a Blend; TAIL_DISSOLVE
+    produces a crossfade Blend into a still, then a cut (see engine)."""
 
     CUT = "cut"
     DIP = "dip"
     CROSSFADE = "crossfade"
     WIPE = "wipe"
+    TAIL_DISSOLVE = "tail_dissolve"
 
 
 @dataclass(frozen=True)

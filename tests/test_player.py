@@ -292,3 +292,44 @@ def test_resume_reveal_reanchors_clock_no_post_catchup_fast_forward(video_file):
     # After ~1 frame-time of real wall clock, playback advances by ~1 frame.
     later = p.frame_at(reveal_now + 0.05)
     assert later.pts == 0.4333
+
+
+def test_preload_captures_the_clips_final_frame(video_file):
+    p = VideoPlayer(video_file)
+    p.preload()
+    try:
+        f = p.last_frame
+        assert isinstance(f, Frame)
+        assert (f.width, f.height) == (64, 48)
+        # 15 frames at 30 fps -> the final frame sits at pts 14/30
+        assert f.pts == pytest.approx(14 / 30, abs=1e-3)
+        # frame i is flat gray level i*16: the final frame is far brighter than the
+        # first (exact Y values depend on the codec's range conversion, so compare)
+        assert f.y.mean() > p.first_frame.y.mean() + 100
+    finally:
+        p.stop()
+
+
+def test_last_frame_capture_failure_never_fails_preload(video_file, monkeypatch):
+    # The end-capture opens a second, isolated container. If that open explodes,
+    # preload() must still succeed with last_frame None -- a broken capture must
+    # never turn a playable clip into a failed cue.
+    import visualgen.player as player_module
+
+    real_open = player_module.av.open
+    calls = {"n": 0}
+
+    def flaky_open(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] >= 2:  # the playback container opens first; the capture second
+            raise RuntimeError("capture container exploded")
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(player_module.av, "open", flaky_open)
+    p = VideoPlayer(video_file)
+    p.preload()  # must not raise
+    try:
+        assert p.first_frame is not None
+        assert p.last_frame is None
+    finally:
+        p.stop()

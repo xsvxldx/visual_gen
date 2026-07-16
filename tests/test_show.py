@@ -110,3 +110,9 @@ def test_cue_missing_keys_raises(tmp_path):
     p = write_show(tmp_path, "show:\n  - {id: intro}\n")
     with pytest.raises(ShowError, match="'id' and 'source'"):
         load_show(p)
+
+
+def test_tail_dissolve_transition_parsed(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "transition: tail_dissolve\nshow:\n  - {id: a, source: a.mp4}\n")
+    assert load_show(p).transition is TransitionMode.TAIL_DISSOLVE
