@@ -40,8 +40,10 @@ identically** with no edits.
 ## Config schema
 
 Per-cue fields are additive; the YAML parser already ignores unknown keys, so this is
-backward-compatible. `Cue` grows from two fields to five, all resolved at load time so nothing
-downstream deals with defaults:
+backward-compatible. `Cue` grows from two fields to five. `transition` / `duration` store the
+**raw per-cue override**, where `None` means "inherit the show-global value." Inheritance is
+resolved by the engine when it builds its per-cue tables (see Architecture), not baked into the
+`Cue`, so a cue built without overrides transparently follows the show global:
 
 ```python
 @dataclass(frozen=True)
@@ -49,20 +51,21 @@ class Cue:
     id: str
     source: Path
     loop: bool = True
-    transition: TransitionMode = TransitionMode.CUT   # resolved: cue value or show-global
-    duration: float = 0.8                             # resolved: cue value or show-global
+    transition: TransitionMode | None = None   # None = inherit show-global
+    duration: float | None = None              # None = inherit show-global
 ```
 
-`load_show()` resolution rules:
+`load_show()` rules:
 
 - `loop` defaults to `true`. This keeps `AGENTS.md:34` ("current video loops indefinitely")
   true by default.
-- A cue's `transition` / `duration`, if present, override the show-global values; if absent
-  they inherit them. Reuses the existing `_parse_transition` / `_parse_duration` validators,
+- A cue's `transition` / `duration`, if present in YAML, are parsed and stored; if absent they
+  stay `None` (inherit). Reuses the existing `_parse_transition` / `_parse_duration` validators,
   so a typo'd per-cue mode fails at startup with the same clear error.
-- **`loop: false` forces the effective `transition` to `cut` at load time.** If a `loop: false`
-  cue also specifies a transition, startup logs a warning that it is ignored. The invariant
-  "loop:false always cuts" is enforced in this one place.
+- **`loop: false` cues always cut.** The engine forces their effective transition to `cut`
+  regardless of the stored value (single enforcement point in the table build). If a
+  `loop: false` cue *also* specifies a `transition` in YAML, `load_show` logs a warning at
+  startup that it is ignored — an operator-visible heads-up, not a hard error.
 
 Example `show.yaml`:
 
@@ -131,23 +134,33 @@ inferred signal, and a single-branch decode-thread change — consistent with th
 ### Per-cue transitions (`engine.py`)
 
 The engine currently holds one `self._mode` / `self._duration` used for every switch
-(`engine.py:124`). These become per-cue tables built from the resolved cue config at
-construction:
+(`engine.py:124`). These become per-cue tables built at construction, resolving `None`
+overrides against the show global and forcing `loop: false` cues to `cut`:
 
 ```python
-self._modes     = [c.transition for c in show.cues]  # loop:false entries already 'cut'
-self._durations = [c.duration   for c in show.cues]
+self._modes = [
+    TransitionMode.CUT if not c.loop else (c.transition or show.transition)
+    for c in show.cues
+]
+self._durations = [
+    (c.duration if c.duration is not None else show.duration) for c in show.cues
+]
 ```
 
 - **`switch_to(A → B)` reads the from-cue's entry:** `mode = self._modes[prev]`,
-  `duration = self._durations[prev]`, replacing the global `self._mode` / `self._duration`.
-  Because `load_show` already forced `loop: false` cues to `cut`, such cues cut automatically on
-  both manual and auto advance — no special-casing in the engine.
+  `duration = self._durations[prev]`, replacing the global `self._mode` / `self._duration`
+  (also threaded into the `_should_blend` / `_tail_possible` helpers, which currently read the
+  globals). Because the table forces `loop: false` cues to `cut`, such cues cut automatically on
+  both manual and auto advance — no special-casing in the switch path.
+- **Players are created with their cue's loop flag:** every `self._factory(cue.source)` call
+  (in `start`, `switch_to`, `_request_preloads`) passes `loop=cue.loop`, so a `loop: false`
+  cue's player stops-and-signals at EOF. The fallback player keeps the default `loop=True`.
 - **Live keys retarget to the current cue:** `cycle_mode()` / `adjust_duration()` mutate
   `self._modes[self._current]` / `self._durations[self._current]` instead of a global, giving
-  session-only per-cue overrides. On a `loop: false` current cue they no-op. The `mode` /
-  `duration` properties return the current cue's values (for the existing log line at
-  `app.py:99`).
+  session-only per-cue overrides. They no-op when there is no current cue, and no-op on a
+  `loop: false` current cue (it always cuts). The `mode` / `duration` properties return the
+  current cue's table value, falling back to `show.transition` / `show.duration` when no cue is
+  current yet (for the existing log line at `app.py:99`).
 
 ### Auto-advance (`app.py`)
 
