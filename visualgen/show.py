@@ -5,6 +5,8 @@ import yaml
 
 from visualgen.instruction import TransitionMode
 
+import logging
+
 
 class ShowError(Exception):
     """A problem with the show file. Message is operator-readable."""
@@ -14,6 +16,9 @@ class ShowError(Exception):
 class Cue:
     id: str
     source: Path
+    loop: bool = True
+    transition: TransitionMode | None = None   # None = inherit the show-global
+    duration: float | None = None              # None = inherit the show-global
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,7 @@ def load_show(path: str | Path) -> Show:
     base = path.parent
     cues: list[Cue] = []
     seen: set[str] = set()
+    log = logging.getLogger(__name__)
     for i, entry in enumerate(entries):
         if not isinstance(entry, dict) or "id" not in entry or "source" not in entry:
             raise ShowError(f"{path}: cue #{i + 1} must have 'id' and 'source'")
@@ -57,7 +63,17 @@ def load_show(path: str | Path) -> Show:
         source = (base / str(entry["source"])).resolve()
         if not source.is_file():
             raise ShowError(f"{path}: cue '{cue_id}': source not found: {source}")
-        cues.append(Cue(cue_id, source))
+        loop = bool(entry.get("loop", True))
+        cue_transition = (
+            _parse_transition(path, entry["transition"]) if "transition" in entry else None
+        )
+        cue_duration = _parse_duration(path, entry["duration"]) if "duration" in entry else None
+        if not loop and cue_transition is not None:
+            log.warning(
+                "%s: cue '%s' is loop: false, so its transition '%s' is ignored (always a hard cut)",
+                path, cue_id, cue_transition.value,
+            )
+        cues.append(Cue(cue_id, source, loop, cue_transition, cue_duration))
     return Show(tuple(cues), wrap, transition, duration)
 
 

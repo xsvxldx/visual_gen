@@ -116,3 +116,57 @@ def test_tail_dissolve_transition_parsed(tmp_path):
     make_video(tmp_path, "a.mp4")
     p = write_show(tmp_path, "transition: tail_dissolve\nshow:\n  - {id: a, source: a.mp4}\n")
     assert load_show(p).transition is TransitionMode.TAIL_DISSOLVE
+
+
+def test_cue_loop_defaults_true_and_overrides(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    make_video(tmp_path, "b.mp4")
+    p = write_show(
+        tmp_path,
+        "show:\n"
+        "  - {id: a, source: a.mp4}\n"
+        "  - {id: b, source: b.mp4, loop: false}\n",
+    )
+    cues = load_show(p).cues
+    assert cues[0].loop is True   # default preserves current behaviour
+    assert cues[1].loop is False
+
+
+def test_cue_transition_and_duration_default_none(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "show:\n  - {id: a, source: a.mp4}\n")
+    cue = load_show(p).cues[0]
+    assert cue.transition is None   # None = inherit the show-global
+    assert cue.duration is None
+
+
+def test_cue_per_transition_and_duration_parsed(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(
+        tmp_path,
+        "transition: crossfade\n"
+        "show:\n"
+        "  - {id: a, source: a.mp4, transition: wipe, duration: 0.4}\n",
+    )
+    cue = load_show(p).cues[0]
+    assert cue.transition is TransitionMode.WIPE
+    assert cue.duration == 0.4
+
+
+def test_cue_bad_per_transition_raises(tmp_path):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(tmp_path, "show:\n  - {id: a, source: a.mp4, transition: sparkle}\n")
+    with pytest.raises(ShowError):
+        load_show(p)
+
+
+def test_loop_false_with_transition_warns(tmp_path, caplog):
+    make_video(tmp_path, "a.mp4")
+    p = write_show(
+        tmp_path,
+        "show:\n  - {id: a, source: a.mp4, loop: false, transition: crossfade}\n",
+    )
+    with caplog.at_level("WARNING"):
+        cue = load_show(p).cues[0]
+    assert cue.loop is False
+    assert any("loop: false" in r.message and "a" in r.message for r in caplog.records)
