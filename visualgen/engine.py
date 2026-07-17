@@ -340,6 +340,35 @@ class PlaybackEngine:
     def transition_complete(self) -> bool:
         return self._transition is None
 
+    def current_cue_ended(self) -> bool:
+        """True when the current cue's player has hit EOF and is holding its last frame --
+        the signal to auto-advance. False during a transition or while on the fallback, so
+        the auto-advance never double-fires."""
+        if self._on_fallback or self._transition is not None or self._current is None:
+            return False
+        player = self._players.get(self._current)
+        return player is not None and player.ended
+
+    def hold_end_of_show(self, now: float) -> None:
+        """Dead end: a loop:false cue ended with nowhere to advance (last cue, wrap off).
+        Engage the fallback looping if configured; otherwise re-loop the cue itself so the
+        screen keeps moving. Idempotent: once on the fallback, current_cue_ended() is False,
+        and the re-loop path clears the ended flag via start()."""
+        if self._engage_fallback(now):
+            return
+        if self._current is None:
+            return
+        player = self._players.get(self._current)
+        if player is None:
+            return
+        try:
+            player.start(now)  # clears the ended flag and replays from the top
+        except PlayerError as exc:
+            log.error(
+                "cue '%s' failed to re-loop at end of show: %s",
+                self._show.cues[self._current].id, exc,
+            )
+
     def stop(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
         for player in self._players.values():

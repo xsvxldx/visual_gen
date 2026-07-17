@@ -626,3 +626,42 @@ def test_live_keys_isolated_per_cue():
     engine.switch_to(1, {0, 2}, now=1.0)   # current cue is now 1
     assert engine.mode is TransitionMode.CUT   # cue 1 untouched by cue 0's tweak
     engine.stop()
+
+
+def test_current_cue_ended_reflects_player_flag():
+    engine, made = make_engine()
+    engine.start(0, {1}, now=0.0)
+    assert engine.current_cue_ended() is False
+    made[Path("/fake/0.mp4")].ended = True
+    assert engine.current_cue_ended() is True
+
+
+def test_current_cue_ended_false_during_transition_and_fallback():
+    show = Show(make_show().cues, transition=TransitionMode.CROSSFADE, duration=1.0)
+    engine, made = make_engine(show=show)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    made[Path("/fake/0.mp4")].ended = True
+    engine.switch_to(1, {0, 2}, now=1.0)          # transition in flight
+    assert engine.current_cue_ended() is False     # suppressed mid-transition
+
+
+def test_hold_end_of_show_engages_fallback():
+    engine, made = make_engine()  # fallback = /fake/safe.mp4
+    engine.start(0, set(), now=0.0)
+    engine.hold_end_of_show(now=1.0)
+    assert engine.current_cue_ended() is False     # now on fallback -> idempotent
+    assert made[Path("/fake/safe.mp4")].started
+    # Fallback loops forever (default loop flag).
+    assert made[Path("/fake/safe.mp4")].loop is True
+
+
+def test_hold_end_of_show_reloops_cue_without_fallback():
+    engine, made = make_engine(fallback=None)
+    engine.start(0, set(), now=0.0)
+    assert wait_ready(engine)
+    made[Path("/fake/0.mp4")].ended = True
+    engine.hold_end_of_show(now=1.0)               # no fallback -> restart the cue
+    p = made[Path("/fake/0.mp4")]
+    assert p.started
+    assert engine.current_cue_ended() is False     # restart cleared ended (FakePlayer.start)
