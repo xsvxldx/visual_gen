@@ -37,6 +37,21 @@ def _parse_args(argv: list[str]) -> tuple[Path, Path]:
     return show_path, config_path
 
 
+def _auto_advance(engine: PlaybackEngine, cue_manager: CueManager, now: float) -> None:
+    """When the current loop:false cue has played out, advance to the next cue
+    (a hard cut, since loop:false cues always cut). At a dead end -- the last cue
+    with wrap off -- hold on the fallback, or re-loop the cue if none is configured.
+    Reuses handle(NEXT), so wrapping, previous-tracking and the SWITCHING guard all
+    apply exactly as for a manual NEXT."""
+    if cue_manager.state is not State.PLAYING or not engine.current_cue_ended():
+        return
+    target = cue_manager.handle(Command.NEXT)
+    if target is not None:
+        engine.switch_to(target, cue_manager.adjacent(), now)
+    else:
+        engine.hold_end_of_show(now)
+
+
 def run(show_path: Path, config_path: Path) -> int:
     show = load_show(show_path)
     config = load_config(config_path)
@@ -109,6 +124,8 @@ def run(show_path: Path, config_path: Path) -> int:
                 and engine.preloads_ready()
             ):
                 cue_manager.complete_switch()
+
+            _auto_advance(engine, cue_manager, clock.now())
 
             instruction = engine.instruction_at(clock.now())
             if instruction is not None:

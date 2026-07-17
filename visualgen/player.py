@@ -32,8 +32,10 @@ def _convert(frame: av.VideoFrame, time_base) -> Frame:
 
 
 class VideoPlayer:
-    def __init__(self, source: str | Path, buffer_size: int = 3):
+    def __init__(self, source: str | Path, buffer_size: int = 3, loop: bool = True):
         self._source = str(source)
+        self._loop = loop
+        self._ended = threading.Event()
         self._frames: queue.Queue[Frame] = queue.Queue(maxsize=buffer_size)
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -48,6 +50,11 @@ class VideoPlayer:
         self._resuming: bool = False
         self.first_frame: Frame | None = None
         self.last_frame: Frame | None = None
+
+    @property
+    def ended(self) -> bool:
+        """True once a loop=False clip has reached EOF and is holding its final frame."""
+        return self._ended.is_set()
 
     def preload(self) -> None:
         try:
@@ -102,6 +109,7 @@ class VideoPlayer:
         if self.first_frame is None:
             raise PlayerError(f"{self._source}: start() before preload()")
         self._halt()
+        self._ended.clear()   # re-arm: a restarted loop=False player can end again
         self._drain()
         if self._container is not None:
             try:
@@ -155,9 +163,16 @@ class VideoPlayer:
                 try:
                     frame = next(decoder)
                 except (StopIteration, av.error.EOFError):
-                    self._container.seek(0)
-                    decoder = self._container.decode(self._stream)
-                    continue
+                    if self._loop:
+                        self._container.seek(0)
+                        decoder = self._container.decode(self._stream)
+                        continue
+                    # The decoder stays up to buffer_size frames ahead of on-screen playback,
+                    # so _ended fires while a few decoded frames are still buffered/unshown.
+                    # A consumer that cuts immediately on `ended` (auto-advance) therefore
+                    # trims the clip's last ~buffer_size frames -- harmless for a hard cut.
+                    self._ended.set()   # loop=False: announce end, stop advancing
+                    break               # thread exits; frame_at() holds the final frame
                 converted = _convert(frame, self._time_base)
                 while not self._stop_event.is_set():
                     try:

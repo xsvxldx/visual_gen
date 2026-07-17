@@ -15,14 +15,47 @@ primary control surface. `--config` defaults to `config.yaml` next to the show f
 
 ## Show file
 
-    wrap: false          # optional: true wraps NEXT/PREVIOUS at the show edges
+    transition: crossfade   # optional show-wide default (see list below); default: cut
+    duration: 0.8           # optional: blend length in seconds; default: 0.8 (ignored for cut)
+    wrap: false             # optional: true wraps NEXT/PREVIOUS at the show edges
     show:
       - id: intro
         source: videos/intro.mp4
       - id: verse
         source: videos/verse.mp4
+        transition: wipe    # optional per-cue override (used when switching AWAY from this cue)
+        duration: 0.4       # optional per-cue override
+      - id: sting
+        source: videos/sting.mp4
+        loop: false         # optional: play once, then hard-cut to the next cue (default: true = loop forever)
 
 Paths are relative to the show file. All files are validated at startup.
+
+### Transitions
+
+The transition applied when you switch away from a cue. Set one show-wide with
+the top-level `transition:` key, and/or override per cue. A cue without its own
+`transition` inherits the show-wide default.
+
+| name            | effect                                                            |
+|-----------------|-------------------------------------------------------------------|
+| `cut`           | instant hard cut (no blend); the default                          |
+| `dip`           | dip through black between the two cues                            |
+| `crossfade`     | fade the outgoing cue directly into the incoming one              |
+| `wipe`          | wipe the incoming cue across over the outgoing one                |
+| `tail_dissolve` | outgoing cue crossfades into a still of its own last frame, then hard-cuts to the incoming cue (one decoder throughout) |
+
+`duration:` (show-wide or per cue) sets how long the blend lasts, in seconds; it
+is ignored for `cut`.
+
+A `loop: false` cue is **always** a hard cut, regardless of any `transition:` set
+on it — it plays once and cuts to the next cue on its own.
+
+### Live keys (rehearsal, session-only)
+
+`t` cycles the current cue's transition (`cut → dip → crossfade → wipe →
+tail_dissolve → cut`); `]` / `[` lengthen / shorten its duration by 0.1s. These
+edits are not written back to the show file.
 
 ## Config file (all keys optional)
 

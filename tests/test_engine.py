@@ -3,6 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from visualgen.app import _auto_advance
+from visualgen.commands import Command
+from visualgen.cues import CueManager, State
 from visualgen.engine import PlaybackEngine
 from visualgen.instruction import Blend, Single, TransitionMode
 from visualgen.player import Frame, PlayerError
@@ -17,8 +20,10 @@ def fake_frame(pts=0.0):
 
 
 class FakePlayer:
-    def __init__(self, source):
+    def __init__(self, source, loop=True):
         self.source = Path(source)
+        self.loop = loop
+        self.ended = False
         self.preloaded = False
         self.started = False
         self.stopped = False
@@ -44,6 +49,7 @@ class FakePlayer:
         self.running = True
         self.started = True
         self.resumed = resume
+        self.ended = False
 
     def pause(self):
         self.running = False
@@ -67,8 +73,8 @@ def make_show(n=4):
 def make_engine(show=None, fallback=Path("/fake/safe.mp4")):
     made = {}
 
-    def factory(source):
-        p = FakePlayer(source)
+    def factory(source, loop=True):
+        p = FakePlayer(source, loop=loop)
         made[Path(source)] = p
         return p
 
@@ -153,16 +159,17 @@ def test_instruction_at_single_engages_fallback_on_failure():
     engine.stop()
 
 
-def test_engine_seeds_mode_and_duration_from_show():
+def test_mode_and_duration_fall_back_to_show_global_before_start():
     show = Show(make_show().cues, transition=TransitionMode.CROSSFADE, duration=1.2)
     engine, made = make_engine(show=show)
-    assert engine.mode is TransitionMode.CROSSFADE
+    assert engine.mode is TransitionMode.CROSSFADE   # no current cue yet -> show-global
     assert engine.duration == 1.2
     engine.stop()
 
 
-def test_cycle_mode_advances_and_wraps():
-    engine, made = make_engine()  # default show -> CUT
+def test_cycle_mode_advances_current_cue_and_wraps():
+    engine, made = make_engine()  # cues inherit show-global CUT
+    engine.start(0, {1}, now=0.0)
     assert engine.mode is TransitionMode.CUT
     engine.cycle_mode()
     assert engine.mode is TransitionMode.DIP
@@ -196,6 +203,7 @@ def test_tail_dissolve_mode_switches_as_a_cut_when_no_tail_is_possible():
 def test_adjust_duration_steps_and_floors_at_min():
     show = Show(make_show().cues, duration=0.5)
     engine, made = make_engine(show=show)
+    engine.start(0, {1}, now=0.0)
     engine.adjust_duration(0.1)
     assert engine.duration == pytest.approx(0.6)
     engine.adjust_duration(-1.0)
@@ -556,3 +564,175 @@ def test_tail_incoming_start_failure_at_the_cut_engages_fallback():
     assert made[Path("/fake/0.mp4")].pause_count == 1, "A is still paused: single-decoder rule holds"
     assert engine.transition_complete(), "must not stay stuck in a transition"
     engine.stop()
+
+
+def test_switch_uses_from_cue_transition():
+    # Leaving cue 0 (crossfade) then leaving cue 1 (wipe) uses each cue's own mode.
+    cues = (
+        Cue("a", Path("/fake/0.mp4"), transition=TransitionMode.CROSSFADE, duration=1.0),
+        Cue("b", Path("/fake/1.mp4"), transition=TransitionMode.WIPE, duration=1.0),
+        Cue("c", Path("/fake/2.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues, wrap=False))
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    engine.switch_to(1, {0, 2}, now=1.0)
+    assert isinstance(engine.instruction_at(1.5), Blend)
+    assert engine.instruction_at(1.5).mode is TransitionMode.CROSSFADE  # left cue 0
+    engine.instruction_at(3.0)  # finalize the first window
+    assert wait_ready(engine)
+    engine.switch_to(2, {1}, now=3.0)
+    assert engine.instruction_at(3.5).mode is TransitionMode.WIPE       # left cue 1
+
+
+def test_loop_false_from_cue_always_cuts():
+    # Cue 0 is loop:false with a crossfade set -> must still hard-cut when left.
+    cues = (
+        Cue("a", Path("/fake/0.mp4"), loop=False, transition=TransitionMode.CROSSFADE, duration=1.0),
+        Cue("b", Path("/fake/1.mp4")),
+    )
+    engine, made = make_engine(show=Show(cues, wrap=False))
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    engine.switch_to(1, {0}, now=1.0)
+    assert engine.transition_complete(), "loop:false cue must cut, not blend"
+    assert isinstance(engine.instruction_at(1.0), Single)
+    assert made[Path("/fake/0.mp4")].pause_count == 1  # paused instantly, like a cut
+
+
+def test_loop_false_player_created_with_loop_flag():
+    cues = (Cue("a", Path("/fake/0.mp4"), loop=False), Cue("b", Path("/fake/1.mp4")))
+    engine, made = make_engine(show=Show(cues, wrap=False))
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    assert made[Path("/fake/0.mp4")].loop is False
+    assert made[Path("/fake/1.mp4")].loop is True
+    engine.stop()
+
+
+def test_live_keys_noop_on_loop_false_current_cue():
+    cues = (Cue("a", Path("/fake/0.mp4"), loop=False), Cue("b", Path("/fake/1.mp4")))
+    engine, made = make_engine(show=Show(cues, wrap=False))
+    engine.start(0, {1}, now=0.0)
+    assert engine.mode is TransitionMode.CUT
+    engine.cycle_mode()               # loop:false current cue -> no-op
+    assert engine.mode is TransitionMode.CUT
+    engine.stop()
+
+
+def test_live_keys_isolated_per_cue():
+    engine, made = make_engine()  # 4 cues, all inherit CUT
+    engine.start(0, {1}, now=0.0)
+    engine.cycle_mode()               # cue 0 -> DIP
+    assert engine.mode is TransitionMode.DIP
+    assert wait_ready(engine)
+    engine.switch_to(1, {0, 2}, now=1.0)   # current cue is now 1
+    assert engine.mode is TransitionMode.CUT   # cue 1 untouched by cue 0's tweak
+    engine.stop()
+
+
+def test_current_cue_ended_reflects_player_flag():
+    engine, made = make_engine()
+    engine.start(0, {1}, now=0.0)
+    assert engine.current_cue_ended() is False
+    made[Path("/fake/0.mp4")].ended = True
+    assert engine.current_cue_ended() is True
+
+
+def test_current_cue_ended_false_during_transition_and_fallback():
+    show = Show(make_show().cues, transition=TransitionMode.CROSSFADE, duration=1.0)
+    engine, made = make_engine(show=show)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    made[Path("/fake/0.mp4")].ended = True
+    engine.switch_to(1, {0, 2}, now=1.0)          # transition in flight
+    assert engine.current_cue_ended() is False     # suppressed mid-transition
+
+
+def test_current_cue_ended_false_on_fallback():
+    # Fallback-suppression branch: distinct from the mid-transition case above.
+    # This assertion would fail if the `self._on_fallback` clause were removed
+    # from current_cue_ended().
+    engine, made = make_engine()
+    engine.start(0, set(), now=0.0)
+    made[Path("/fake/0.mp4")].ended = True
+    engine.hold_end_of_show(now=1.0)               # engages the fallback
+    assert engine.current_cue_ended() is False     # suppressed by _on_fallback
+
+
+def test_hold_end_of_show_engages_fallback():
+    engine, made = make_engine()  # fallback = /fake/safe.mp4
+    engine.start(0, set(), now=0.0)  # current cue is 0
+    made[Path("/fake/0.mp4")].ended = True  # still-ended current player must be suppressed below
+    engine.hold_end_of_show(now=1.0)
+    assert engine.current_cue_ended() is False     # suppressed by _on_fallback, not because it isn't ended
+    assert made[Path("/fake/safe.mp4")].started
+    # Fallback loops forever (default loop flag).
+    assert made[Path("/fake/safe.mp4")].loop is True
+
+
+def test_hold_end_of_show_reloops_cue_without_fallback():
+    engine, made = make_engine(fallback=None)
+    engine.start(0, set(), now=0.0)
+    assert wait_ready(engine)
+    made[Path("/fake/0.mp4")].ended = True
+    engine.hold_end_of_show(now=1.0)               # no fallback -> restart the cue
+    p = made[Path("/fake/0.mp4")]
+    assert p.started
+    assert engine.current_cue_ended() is False     # restart cleared ended (FakePlayer.start)
+
+
+def test_auto_advance_switches_on_ended_loop_false_cue():
+    cues = (
+        Cue("a", Path("/fake/0.mp4"), loop=False),
+        Cue("b", Path("/fake/1.mp4")),
+    )
+    show = Show(cues, wrap=False)
+    engine, made = make_engine(show=show)
+    cm = CueManager(len(cues), wrap=False)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    made[Path("/fake/0.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)
+    assert cm.index == 1                       # advanced to the next cue
+    assert cm.state is State.SWITCHING         # went through the normal switch path
+    assert engine.transition_complete()        # loop:false -> hard cut, no blend window
+
+
+def test_auto_advance_ignored_while_switching():
+    engine, made = make_engine()
+    cm = CueManager(4, wrap=False)
+    engine.start(0, {1}, now=0.0)
+    cm.handle(Command.NEXT)                     # cm now SWITCHING
+    made[Path("/fake/0.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)         # must not fire a second switch
+    assert cm.index == 1                        # unchanged from the manual NEXT
+
+
+def test_auto_advance_wraps_on_last_cue_when_wrap_true():
+    cues = (
+        Cue("a", Path("/fake/0.mp4")),
+        Cue("b", Path("/fake/1.mp4"), loop=False),
+    )
+    show = Show(cues, wrap=True)
+    engine, made = make_engine(show=show)
+    cm = CueManager(len(cues), wrap=True)
+    cm.handle(Command.NEXT)                     # move the CueManager to the last cue...
+    cm.complete_switch()                        # ...and land there (index 1)
+    engine.start(1, {0}, now=0.0)              # engine starts on the last cue too
+    assert wait_ready(engine)
+    made[Path("/fake/1.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)
+    assert cm.index == 0                        # wrapped to the first cue
+
+
+def test_auto_advance_dead_end_holds_on_fallback():
+    cues = (Cue("a", Path("/fake/0.mp4"), loop=False),)
+    show = Show(cues, wrap=False)
+    engine, made = make_engine(show=show)      # fallback = /fake/safe.mp4
+    cm = CueManager(len(cues), wrap=False)
+    engine.start(0, set(), now=0.0)
+    made[Path("/fake/0.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)         # last cue, wrap off -> dead end
+    assert cm.index == 0                        # no advance
+    assert made[Path("/fake/safe.mp4")].started # fallback engaged

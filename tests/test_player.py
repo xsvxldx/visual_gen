@@ -310,6 +310,45 @@ def test_preload_captures_the_clips_final_frame(video_file):
         p.stop()
 
 
+def test_loop_false_signals_ended_and_holds_last_frame(video_file):
+    p = VideoPlayer(video_file, loop=False)
+    p.preload()
+    start = time.monotonic()
+    p.start(now=start)
+    try:
+        # Wait (real time) for the decode thread to reach EOF and signal. Pass a
+        # large `now` so frame_at reveals frames as fast as they are decoded.
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not p.ended:
+            p.frame_at(start + 1.0)
+            time.sleep(0.01)
+        assert p.ended, "loop=False player must signal ended at EOF"
+        # With `now` well past the clip end, the buffer drains to the final frame
+        # and holds it -- it must never advance further or wrap back to frame 0.
+        held = p.frame_at(start + 5.0)
+        again = p.frame_at(start + 9.0)
+        assert again.pts == held.pts, "must hold a single final frame, not advance or wrap"
+        assert held.pts > 0.0, "should hold a late frame, not frame 0 (never wrapped to start)"
+    finally:
+        p.stop()
+
+
+def test_start_clears_ended_flag(video_file):
+    p = VideoPlayer(video_file, loop=False)
+    p.preload()
+    start = time.monotonic()
+    p.start(now=start)
+    try:
+        while time.monotonic() - start < 3.0 and not p.ended:
+            p.frame_at(time.monotonic())
+            time.sleep(0.01)
+        assert p.ended
+        p.start(now=time.monotonic())   # restart re-arms
+        assert p.ended is False
+    finally:
+        p.stop()
+
+
 def test_last_frame_capture_failure_never_fails_preload(video_file, monkeypatch):
     # The end-capture opens a second, isolated container. If that open explodes,
     # preload() must still succeed with last_frame None -- a broken capture must

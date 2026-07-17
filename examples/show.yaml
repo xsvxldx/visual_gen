@@ -5,12 +5,16 @@
 # Rules enforced at startup: every source file must exist; every id must be unique.
 # You need at least 2 cues to see switching.
 
-# Transitions between adjacent cues (all optional; omit for an instant hard cut).
-#   transition: cut | dip | crossfade | wipe   (default: cut)
-#   duration:   seconds the blend lasts         (default: 0.8; ignored for cut)
-# Live keys while running (session-only, not written back here):
-#   t     cycle the blend:  cut -> dip -> crossfade -> wipe -> cut
-#   ]  [  lengthen / shorten the duration by 0.1s (floored at 0.1s)
+# Per-cue options (all optional):
+#   loop:       true (default) -> the clip rewinds forever until you advance.
+#               false          -> the clip plays once, then HARD-CUTS to the next cue on its own.
+#   transition: cut | dip | crossfade | wipe | tail_dissolve   (default: the show-global below)
+#               -- used when you switch AWAY from this cue. Ignored for loop:false cues (always cut).
+#   duration:   seconds the blend lasts   (default: the show-global below; ignored for cut)
+# The show-global transition/duration below are the defaults for cues that omit their own.
+# Live keys while running (session-only, edit the CURRENT on-screen cue; not written back):
+#   t     cycle its transition:  cut -> dip -> crossfade -> wipe -> tail_dissolve -> cut
+#   ]  [  lengthen / shorten its duration by 0.1s (floored at 0.1s)
 transition: crossfade
 duration: 0.8
 
@@ -19,8 +23,10 @@ show:
     source: clips/horse.mp4
   - id: montecarlo
     source: clips/montecarlo.mp4
-  - id: onirofobia
+    transition: wipe        # leaving montecarlo uses a wipe
+  - id: sting
     source: clips/onirofobia.mp4
+    loop: false             # plays once, then hard-cuts to trinch
   - id: trinch
     source: clips/reel.mp4
 
