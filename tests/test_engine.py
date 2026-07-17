@@ -649,11 +649,23 @@ def test_current_cue_ended_false_during_transition_and_fallback():
     assert engine.current_cue_ended() is False     # suppressed mid-transition
 
 
+def test_current_cue_ended_false_on_fallback():
+    # Fallback-suppression branch: distinct from the mid-transition case above.
+    # This assertion would fail if the `self._on_fallback` clause were removed
+    # from current_cue_ended().
+    engine, made = make_engine()
+    engine.start(0, set(), now=0.0)
+    made[Path("/fake/0.mp4")].ended = True
+    engine.hold_end_of_show(now=1.0)               # engages the fallback
+    assert engine.current_cue_ended() is False     # suppressed by _on_fallback
+
+
 def test_hold_end_of_show_engages_fallback():
     engine, made = make_engine()  # fallback = /fake/safe.mp4
-    engine.start(0, set(), now=0.0)
+    engine.start(0, set(), now=0.0)  # current cue is 0
+    made[Path("/fake/0.mp4")].ended = True  # still-ended current player must be suppressed below
     engine.hold_end_of_show(now=1.0)
-    assert engine.current_cue_ended() is False     # now on fallback -> idempotent
+    assert engine.current_cue_ended() is False     # suppressed by _on_fallback, not because it isn't ended
     assert made[Path("/fake/safe.mp4")].started
     # Fallback loops forever (default loop flag).
     assert made[Path("/fake/safe.mp4")].loop is True

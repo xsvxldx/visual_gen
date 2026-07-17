@@ -37,7 +37,7 @@ def _parse_args(argv: list[str]) -> tuple[Path, Path]:
     return show_path, config_path
 
 
-def _auto_advance(engine, cue_manager, now) -> None:
+def _auto_advance(engine: PlaybackEngine, cue_manager: CueManager, now: float) -> None:
     """When the current loop:false cue has played out, advance to the next cue
     (a hard cut, since loop:false cues always cut). At a dead end -- the last cue
     with wrap off -- hold on the fallback, or re-loop the cue if none is configured.

@@ -167,6 +167,10 @@ class VideoPlayer:
                         self._container.seek(0)
                         decoder = self._container.decode(self._stream)
                         continue
+                    # The decoder stays up to buffer_size frames ahead of on-screen playback,
+                    # so _ended fires while a few decoded frames are still buffered/unshown.
+                    # A consumer that cuts immediately on `ended` (auto-advance) therefore
+                    # trims the clip's last ~buffer_size frames -- harmless for a hard cut.
                     self._ended.set()   # loop=False: announce end, stop advancing
                     break               # thread exits; frame_at() holds the final frame
                 converted = _convert(frame, self._time_base)
