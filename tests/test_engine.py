@@ -3,6 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from visualgen.app import _auto_advance
+from visualgen.commands import Command
+from visualgen.cues import CueManager, State
 from visualgen.engine import PlaybackEngine
 from visualgen.instruction import Blend, Single, TransitionMode
 from visualgen.player import Frame, PlayerError
@@ -665,3 +668,59 @@ def test_hold_end_of_show_reloops_cue_without_fallback():
     p = made[Path("/fake/0.mp4")]
     assert p.started
     assert engine.current_cue_ended() is False     # restart cleared ended (FakePlayer.start)
+
+
+def test_auto_advance_switches_on_ended_loop_false_cue():
+    cues = (
+        Cue("a", Path("/fake/0.mp4"), loop=False),
+        Cue("b", Path("/fake/1.mp4")),
+    )
+    show = Show(cues, wrap=False)
+    engine, made = make_engine(show=show)
+    cm = CueManager(len(cues), wrap=False)
+    engine.start(0, {1}, now=0.0)
+    assert wait_ready(engine)
+    made[Path("/fake/0.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)
+    assert cm.index == 1                       # advanced to the next cue
+    assert cm.state is State.SWITCHING         # went through the normal switch path
+    assert engine.transition_complete()        # loop:false -> hard cut, no blend window
+
+
+def test_auto_advance_ignored_while_switching():
+    engine, made = make_engine()
+    cm = CueManager(4, wrap=False)
+    engine.start(0, {1}, now=0.0)
+    cm.handle(Command.NEXT)                     # cm now SWITCHING
+    made[Path("/fake/0.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)         # must not fire a second switch
+    assert cm.index == 1                        # unchanged from the manual NEXT
+
+
+def test_auto_advance_wraps_on_last_cue_when_wrap_true():
+    cues = (
+        Cue("a", Path("/fake/0.mp4")),
+        Cue("b", Path("/fake/1.mp4"), loop=False),
+    )
+    show = Show(cues, wrap=True)
+    engine, made = make_engine(show=show)
+    cm = CueManager(len(cues), wrap=True)
+    cm.handle(Command.NEXT)                     # move the CueManager to the last cue...
+    cm.complete_switch()                        # ...and land there (index 1)
+    engine.start(1, {0}, now=0.0)              # engine starts on the last cue too
+    assert wait_ready(engine)
+    made[Path("/fake/1.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)
+    assert cm.index == 0                        # wrapped to the first cue
+
+
+def test_auto_advance_dead_end_holds_on_fallback():
+    cues = (Cue("a", Path("/fake/0.mp4"), loop=False),)
+    show = Show(cues, wrap=False)
+    engine, made = make_engine(show=show)      # fallback = /fake/safe.mp4
+    cm = CueManager(len(cues), wrap=False)
+    engine.start(0, set(), now=0.0)
+    made[Path("/fake/0.mp4")].ended = True
+    _auto_advance(engine, cm, now=1.0)         # last cue, wrap off -> dead end
+    assert cm.index == 0                        # no advance
+    assert made[Path("/fake/safe.mp4")].started # fallback engaged
