@@ -33,8 +33,15 @@ class PlaybackEngine:
     ):
         self._show = show
         self._factory = player_factory
-        self._mode = show.transition  # session state, seeded from YAML; live keys mutate it
-        self._duration = show.duration
+        # Per-cue transition/duration, resolved from the show-global for cues that omit
+        # their own, and forced to a hard cut for loop:false cues (which always cut).
+        self._modes = [
+            TransitionMode.CUT if not c.loop else (c.transition or show.transition)
+            for c in show.cues
+        ]
+        self._durations = [
+            c.duration if c.duration is not None else show.duration for c in show.cues
+        ]
         self._players: dict[int, VideoPlayer] = {}
         self._pending: dict[int, Future] = {}
         self._failed: set[int] = set()
@@ -57,25 +64,41 @@ class PlaybackEngine:
 
     @property
     def mode(self) -> TransitionMode:
-        return self._mode
+        if self._current is None:
+            return self._show.transition
+        return self._modes[self._current]
 
     @property
     def duration(self) -> float:
-        return self._duration
+        if self._current is None:
+            return self._show.duration
+        return self._durations[self._current]
 
     def cycle_mode(self) -> None:
-        """Advance the mode: cut -> dip -> crossfade -> wipe -> tail_dissolve -> cut. Session-only."""
+        """Advance the current cue's transition: cut -> dip -> crossfade -> wipe ->
+        tail_dissolve -> cut. Session-only. No-op with no current cue, or on a
+        loop:false cue (which always cuts)."""
+        if self._current is None or not self._show.cues[self._current].loop:
+            return
         modes = list(TransitionMode)
-        self._mode = modes[(modes.index(self._mode) + 1) % len(modes)]
+        current = self._modes[self._current]
+        self._modes[self._current] = modes[(modes.index(current) + 1) % len(modes)]
 
     def adjust_duration(self, delta: float) -> None:
-        """Nudge the transition duration, floored at _MIN_DURATION. Session-only."""
-        self._duration = round(max(self._MIN_DURATION, self._duration + delta), 3)
+        """Nudge the current cue's transition duration, floored at _MIN_DURATION.
+        Session-only. No-op with no current cue, or on a loop:false cue."""
+        if self._current is None or not self._show.cues[self._current].loop:
+            return
+        self._durations[self._current] = round(
+            max(self._MIN_DURATION, self._durations[self._current] + delta), 3
+        )
 
     def start(self, index: int, adjacent: set[int], now: float) -> None:
         self._current = index
         try:
-            player = self._factory(self._show.cues[index].source)
+            player = self._factory(
+                self._show.cues[index].source, loop=self._show.cues[index].loop
+            )
             player.preload()
             player.start(now)
             self._players[index] = player
@@ -92,10 +115,14 @@ class PlaybackEngine:
         was_on_fallback = self._on_fallback
         self._on_fallback = False
         from_player = self._players.get(prev) if prev is not None and prev != index else None
+        mode = self._modes[prev] if prev is not None else TransitionMode.CUT
+        duration = self._durations[prev] if prev is not None else 0.0
         player = self._players.get(index)
         if player is None:
             try:
-                player = self._factory(self._show.cues[index].source)
+                player = self._factory(
+                    self._show.cues[index].source, loop=self._show.cues[index].loop
+                )
                 player.preload()
                 self._players[index] = player
             except PlayerError as exc:
@@ -103,12 +130,12 @@ class PlaybackEngine:
                 self._failed.add(index)
                 self._engage_fallback(now)
                 player = None
-        if self._tail_possible(from_player, player, was_on_fallback):
+        if self._tail_possible(from_player, player, was_on_fallback, mode, duration):
             # Tail dissolve: nothing starts and nothing pauses here. A keeps decoding
             # toward its own last-frame still; B's start is deferred to the cut
             # (_finalize_transition). Exactly one decoder runs throughout.
             self._transition = _Transition(
-                prev, index, now, self._duration, TransitionMode.CROSSFADE,
+                prev, index, now, duration, TransitionMode.CROSSFADE,
                 tail_frame=from_player.last_frame, resume=resume,
             )
         else:
@@ -119,9 +146,9 @@ class PlaybackEngine:
                     log.error("cue '%s' failed to start: %s", self._show.cues[index].id, exc)
                     self._failed.add(index)
                     self._engage_fallback(now)
-            if self._should_blend(from_player, player):
+            if self._should_blend(from_player, player, mode, duration):
                 # Keep both players decoding for the window; the outgoing one is paused at finalize.
-                self._transition = _Transition(prev, index, now, self._duration, self._mode)
+                self._transition = _Transition(prev, index, now, duration, mode)
             else:
                 self._transition = None
                 if from_player is not None:
@@ -136,11 +163,13 @@ class PlaybackEngine:
         from_player: VideoPlayer | None,
         to_player: VideoPlayer | None,
         was_on_fallback: bool,
+        mode: TransitionMode,
+        duration: float,
     ) -> bool:
         """All preconditions for a tail dissolve; anything short of this is a plain cut."""
         return (
-            self._mode is TransitionMode.TAIL_DISSOLVE
-            and self._duration > 0
+            mode is TransitionMode.TAIL_DISSOLVE
+            and duration > 0
             and to_player is not None
             and from_player is not None
             and from_player.last_frame is not None
@@ -148,12 +177,18 @@ class PlaybackEngine:
             and not self._on_fallback  # destination just failed to load -> fallback owns the screen
         )
 
-    def _should_blend(self, from_player: VideoPlayer | None, to_player: VideoPlayer | None) -> bool:
+    def _should_blend(
+        self,
+        from_player: VideoPlayer | None,
+        to_player: VideoPlayer | None,
+        mode: TransitionMode,
+        duration: float,
+    ) -> bool:
         return (
             # TAIL_DISSOLVE has its own switch path; here it must degrade to a cut,
             # never to a two-live-player base blend.
-            self._mode not in (TransitionMode.CUT, TransitionMode.TAIL_DISSOLVE)
-            and self._duration > 0
+            mode not in (TransitionMode.CUT, TransitionMode.TAIL_DISSOLVE)
+            and duration > 0
             and from_player is not None
             and to_player is not None
             and not self._on_fallback  # target fell back -> nothing healthy to blend into
@@ -163,7 +198,7 @@ class PlaybackEngine:
         for i in indices:
             if i in self._players or i in self._pending or i in self._failed:
                 continue
-            player = self._factory(self._show.cues[i].source)
+            player = self._factory(self._show.cues[i].source, loop=self._show.cues[i].loop)
 
             def job(p=player):
                 p.preload()
