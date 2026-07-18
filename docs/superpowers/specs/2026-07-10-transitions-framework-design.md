@@ -4,8 +4,9 @@
 **Date:** 2026-07-10
 **Supersedes (in part):** `2026-07-09-transitions-design.md` (the earlier DRAFT). This spec
 promotes that draft's approved Sections 1–3 to an implementable spec and adds the mid-transition
-failure rule. The **morph** capability (that draft's Sections 4–5) is intentionally **out of
-scope here** and remains a separate later cycle.
+failure rule. The **morph** capability (that draft's Sections 4–5) was intentionally out of
+scope here; it is now **dropped (2026-07-17)** — see the "Dropped" section. Author morph/effect
+content as a pre-rendered video cue instead.
 
 **Ground rule that governs everything below:** reliability over cleverness — this runs live
 performances. A transition must never leave a broken or half-finished image on screen.
@@ -241,10 +242,19 @@ deliberately-broken target cue during a transition lands on the fallback with no
   validating that shape before the clip machinery exists. (Variant, not chosen: freeze A-current
   at press — already held as `_last_frame` — and dissolve two held stills, so **zero** video
   decodes during the window; cheaper, but loses the live motion.)
-- **Morph-bridge type:** pre-rendered ComfyUI clip played as a bridge between an A→B pair;
-  `morph_next` / `morph_prev` YAML per direction; morph preloading; the crossfade-in / clip-body
-  / handoff-to-B orchestration; the authoring contract (morph[0] = A.last, morph[last] = B.first;
-  resolution/fps/codec expectations; load-time validation warning). See
-  `2026-07-09-transitions-design.md` Sections 4 and "Open items" for the captured brainstorm.
-- **Snap-interrupt** of an in-flight transition (mid-transition re-press), including morph
-  snap-abort. Seam is built to accept it later without rework.
+- **Snap-interrupt** of an in-flight transition (mid-transition re-press). Seam is built to
+  accept it later without rework.
+
+---
+
+## Dropped (recorded, not planned)
+
+- **Morph-bridge type** — a pre-rendered ComfyUI clip auto-played as a bridge between an A→B pair
+  (`morph_next` / `morph_prev` YAML, morph preloading, crossfade-in / clip-body / handoff
+  orchestration, authoring contract). **Dropped 2026-07-17.** Rationale: the same visual result is
+  achieved by authoring the morph/effect as a normal video clip and loading it as an ordinary cue —
+  no special transition machinery, no renderer changes, no per-pair YAML. The seam was designed so
+  morph *could* be added later with no renderer changes, but the simpler video-cue approach covers
+  the use case. The remaining effect path is the **shader pipeline** / **effect chaining** roadmap
+  items (#2–#3). See the superseded `2026-07-09-transitions-design.md` Sections 4 and "Open items"
+  for the original brainstorm.

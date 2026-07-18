@@ -9,6 +9,11 @@ plan yet.
 **What's still open:** Section 4 (morph specifics: preloading, snap-abort of a morph clip)
 and Section 5 (testing strategy) were not finished. See "Open items" at the end.
 
+**Morph-bridge dropped (2026-07-17):** the morph-bridge transition type described in Sections 4–5
+is no longer planned. Achieve the same result by authoring the morph/effect as a pre-rendered
+video and loading it as a normal cue. The base framework was delivered instead via
+`2026-07-10-transitions-framework-design.md`.
+
 ---
 
 ## Goal

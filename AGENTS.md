@@ -244,9 +244,12 @@ Do not implement roadmap items before the MVP is complete unless explicitly requ
   merged to `main` (2026-07-10)**: spec `docs/superpowers/specs/2026-07-09-cue-recall-design.md`,
   plan `docs/superpowers/plans/2026-07-09-cue-recall.md`. Built via TDD; the resume timing path
   needed several review-driven fixes (see the plan/auto-memory). Operator-confirmed on hardware.
-- **Transitions** (roadmap #1–3: crossfades, shader pipeline, effect chaining) — **draft,
-  deferred**, now the next post-MVP item: `docs/superpowers/specs/2026-07-09-transitions-design.md`.
-  Sections 1–3 settled; Sections 4 (morph specifics) and 5 (testing) unfinished — resume there.
+- **Transitions** (roadmap #1–3: crossfades, shader pipeline, effect chaining) — base framework
+  **DONE & merged** (`2026-07-10` spec; `tail_dissolve` added 2026-07-11). The **morph-bridge
+  transition type** is **dropped (2026-07-17)**: author the morph/effect as a video and load it as
+  a normal cue. **Deferred:** snap-interrupt of an in-flight transition. The effect path remains the
+  **shader pipeline** / **effect chaining** roadmap items (#2–#3). The superseded `2026-07-09`
+  draft's morph Sections 4–5 are no longer planned.
 
 ---
 
