@@ -1,6 +1,6 @@
 # visualgen
 
-Lightweight MIDI-controlled fullscreen video engine for live performance on macOS.
+Lightweight MIDI-controlled fullscreen video engine for live performance on macOS.  
 Created for Interruptus.
 
 ## Install
